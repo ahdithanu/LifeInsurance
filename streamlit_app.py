@@ -453,6 +453,10 @@ Format as clear bullets starting with bold action words like "⚠️ Address:", 
         monthly_stats.columns = ['Month', 'New Customers', 'Avg Coverage', 'Avg Risk Score']
         
         # Calculate trend direction
+        customer_change = 0
+        coverage_change = 0
+        risk_change = 0
+        
         if len(monthly_stats) >= 2:
             customer_change = ((monthly_stats['New Customers'].iloc[-1] - monthly_stats['New Customers'].iloc[0]) / 
                              monthly_stats['New Customers'].iloc[0] * 100)
@@ -463,10 +467,14 @@ Format as clear bullets starting with bold action words like "⚠️ Address:", 
         st.markdown("### 📈 Trend Analysis")
         
         # Customer Acquisition with insight
-        st.markdown(f"""
-        **Customer Growth Trajectory**
-        {f"📈 Up {customer_change:.1f}% from baseline" if customer_change > 0 else f"📉 Down {abs(customer_change):.1f}% from baseline"}
-        """)
+        if len(monthly_stats) >= 2:
+            st.markdown(f"""
+            **Customer Growth Trajectory**
+            {f"📈 Up {customer_change:.1f}% from baseline" if customer_change > 0 else f"📉 Down {abs(customer_change):.1f}% from baseline"}
+            """)
+        else:
+            st.markdown("**Customer Growth Trajectory**")
+            st.caption("Need at least 2 months of data to show trends")
         
         fig = px.line(monthly_stats, x='Month', y='New Customers',
                      markers=True, color_discrete_sequence=[BURNT_ORANGE])
@@ -476,45 +484,57 @@ Format as clear bullets starting with bold action words like "⚠️ Address:", 
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown(f"""
-            **Coverage Trends**
-            {f"💰 Average coverage {'increased' if coverage_change > 0 else 'decreased'} by {abs(coverage_change):.1f}%"}
-            """)
+            if len(monthly_stats) >= 2:
+                st.markdown(f"""
+                **Coverage Trends**
+                {f"💰 Average coverage {'increased' if coverage_change > 0 else 'decreased'} by {abs(coverage_change):.1f}%"}
+                """)
+            else:
+                st.markdown("**Coverage Trends**")
+                st.caption("Need at least 2 months of data to show trends")
+            
             fig = px.line(monthly_stats, x='Month', y='Avg Coverage',
                          markers=True, color_discrete_sequence=[CHARCOAL_GRAY])
             fig.update_layout(showlegend=False, yaxis_tickprefix="$", height=300)
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            st.markdown(f"""
-            **Risk Profile Changes**
-            {f"⚠️ Risk score {'increased' if risk_change > 0 else 'decreased'} by {abs(risk_change):.2f} points"}
-            """)
+            if len(monthly_stats) >= 2:
+                st.markdown(f"""
+                **Risk Profile Changes**
+                {f"⚠️ Risk score {'increased' if risk_change > 0 else 'decreased'} by {abs(risk_change):.2f} points"}
+                """)
+            else:
+                st.markdown("**Risk Profile Changes**")
+                st.caption("Need at least 2 months of data to show trends")
+            
             fig = px.line(monthly_stats, x='Month', y='Avg Risk Score',
                          markers=True, color_discrete_sequence=['#d32f2f'])
             fig.update_layout(showlegend=False, height=300)
             st.plotly_chart(fig, use_container_width=True)
         
         # Policy mix analysis
-        if 'policy_type' in df.columns:
+        if 'policy_type' in df.columns and len(monthly_stats) >= 1:
             st.markdown("---")
             st.markdown("### 📊 Portfolio Composition")
             
             policy_monthly = df.groupby(['month', 'policy_type']).size().reset_index(name='count')
             
             # Calculate policy mix insights
-            latest_month = policy_monthly[policy_monthly['month'] == policy_monthly['month'].max()]
-            policy_leader = latest_month.nlargest(1, 'count')['policy_type'].values[0]
-            policy_leader_pct = latest_month.nlargest(1, 'count')['count'].values[0] / latest_month['count'].sum() * 100
-            
-            st.markdown(f"""
-            **Current Mix:** {policy_leader} dominates at {policy_leader_pct:.1f}% of new policies
-            """)
-            
-            fig = px.area(policy_monthly, x='month', y='count', color='policy_type',
-                        color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
-            fig.update_layout(xaxis_title="Month", yaxis_title="Count", height=300)
-            st.plotly_chart(fig, use_container_width=True)
+            if len(policy_monthly) > 0:
+                latest_month = policy_monthly[policy_monthly['month'] == policy_monthly['month'].max()]
+                if len(latest_month) > 0:
+                    policy_leader = latest_month.nlargest(1, 'count')['policy_type'].values[0]
+                    policy_leader_pct = latest_month.nlargest(1, 'count')['count'].values[0] / latest_month['count'].sum() * 100
+                    
+                    st.markdown(f"""
+                    **Current Mix:** {policy_leader} dominates at {policy_leader_pct:.1f}% of new policies
+                    """)
+                    
+                    fig = px.area(policy_monthly, x='month', y='count', color='policy_type',
+                                color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
+                    fig.update_layout(xaxis_title="Month", yaxis_title="Count", height=300)
+                    st.plotly_chart(fig, use_container_width=True)
     
     # Key metrics with context
     st.markdown("---")
