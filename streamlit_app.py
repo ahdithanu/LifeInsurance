@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import os
 from anthropic import Anthropic
+import json
 
 # Page Configuration
 st.set_page_config(
@@ -32,7 +33,6 @@ st.markdown(f"""
         background-color: #EBFFF7;
     }}
     
-    /* Header styling */
     .header-container {{
         background: linear-gradient(135deg, {BURNT_ORANGE} 0%, #9A4600 100%);
         padding: 2rem;
@@ -55,17 +55,6 @@ st.markdown(f"""
         opacity: 0.95;
     }}
     
-    /* Metric cards */
-    .metric-card {{
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        border-left: 4px solid {BURNT_ORANGE};
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
-    }}
-    
-    /* Buttons */
     .stButton>button {{
         background-color: {BURNT_ORANGE};
         color: white;
@@ -73,7 +62,6 @@ st.markdown(f"""
         padding: 0.5rem 2rem;
         font-weight: 600;
         border: none;
-        transition: all 0.3s;
     }}
     
     .stButton>button:hover {{
@@ -81,7 +69,6 @@ st.markdown(f"""
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }}
     
-    /* Insight box */
     .insight-box {{
         background: linear-gradient(135deg, {BURNT_ORANGE} 0%, #9A4600 100%);
         color: white;
@@ -91,7 +78,6 @@ st.markdown(f"""
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }}
     
-    /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {{
         gap: 2rem;
         background-color: white;
@@ -103,44 +89,14 @@ st.markdown(f"""
         padding: 1rem 2rem;
         font-weight: 600;
         color: {CHARCOAL_GRAY};
-        background-color: transparent;
-        border-radius: 8px;
     }}
     
     .stTabs [aria-selected="true"] {{
         background-color: {BURNT_ORANGE};
         color: white;
+        border-radius: 8px;
     }}
     
-    /* Risk badges */
-    .risk-high {{
-        color: #d32f2f;
-        background-color: rgba(211, 47, 47, 0.1);
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: 600;
-        display: inline-block;
-    }}
-    
-    .risk-medium {{
-        color: #f57c00;
-        background-color: rgba(245, 124, 0, 0.1);
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: 600;
-        display: inline-block;
-    }}
-    
-    .risk-low {{
-        color: #388e3c;
-        background-color: rgba(56, 142, 60, 0.1);
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: 600;
-        display: inline-block;
-    }}
-    
-    /* Hide Streamlit branding */
     #MainMenu {{visibility: hidden;}}
     footer {{visibility: hidden;}}
     
@@ -150,6 +106,21 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
+# Data persistence functions
+DATA_FILE = 'data/persistent_insurance_data.csv'
+
+def save_data(df):
+    """Save uploaded data to persistent storage"""
+    os.makedirs('data', exist_ok=True)
+    df.to_csv(DATA_FILE, index=False)
+    return True
+
+def load_persistent_data():
+    """Load previously saved data"""
+    if os.path.exists(DATA_FILE):
+        return pd.read_csv(DATA_FILE)
+    return None
+
 # Initialize Anthropic client
 @st.cache_resource
 def get_claude_client():
@@ -158,17 +129,17 @@ def get_claude_client():
         return None
     return Anthropic(api_key=api_key)
 
-# Data loading and processing functions
 @st.cache_data
 def load_data(uploaded_file=None):
     """Load and process life insurance data"""
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
+        # Save for persistence
+        save_data(df)
     else:
-        # Try to load default data
-        try:
-            df = pd.read_csv('data/life_insurance_data.csv')
-        except:
+        # Try to load persistent data first
+        df = load_persistent_data()
+        if df is None:
             return None
     
     # Convert date fields
@@ -179,8 +150,7 @@ def load_data(uploaded_file=None):
         df['age'] = (pd.Timestamp.now() - df['dob']).dt.days // 365
     
     # Convert numeric fields
-    numeric_cols = ['insurance_face_amount', 'height', 'weight']
-    for col in numeric_cols:
+    for col in ['insurance_face_amount', 'height', 'weight']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
@@ -308,6 +278,21 @@ with st.sidebar:
     st.markdown("### 📊 Upload Data")
     uploaded_file = st.file_uploader("Upload Life Insurance CSV", type=['csv'])
     
+    if uploaded_file is not None:
+        st.success("✅ New data uploaded and saved!")
+    elif load_persistent_data() is not None:
+        st.info("📂 Using previously uploaded data")
+    
+    st.markdown("---")
+    
+    # Clear data option
+    if st.button("🗑️ Clear Saved Data"):
+        if os.path.exists(DATA_FILE):
+            os.remove(DATA_FILE)
+            st.cache_data.clear()
+            st.success("Data cleared! Please upload new file.")
+            st.rerun()
+    
     st.markdown("---")
     st.markdown("### ℹ️ About")
     st.markdown("""
@@ -315,6 +300,8 @@ with st.sidebar:
     - Upsell opportunities
     - At-risk customers
     - Portfolio optimization insights
+    - Geographic distribution
+    - Trends over time
     
     **Built by Syntex Data**
     """)
@@ -327,7 +314,8 @@ with st.sidebar:
 df = load_data(uploaded_file)
 
 if df is None:
-    st.warning("⚠️ No data loaded. Please upload a CSV file or ensure data/life_insurance_data.csv exists.")
+    st.warning("⚠️ No data loaded. Please upload a CSV file.")
+    st.info("💡 **Tip:** Upload a CSV with customer life insurance data to get started.")
     st.stop()
 
 # Store in session state
@@ -340,44 +328,209 @@ else:
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric(
-        label="Total Customers",
-        value=f"{len(df):,}",
-        delta=None
-    )
+    st.metric("Total Customers", f"{len(df):,}")
 
 with col2:
     avg_coverage = df['insurance_face_amount'].mean() if 'insurance_face_amount' in df else 0
-    st.metric(
-        label="Avg Coverage",
-        value=f"${avg_coverage:,.0f}",
-        delta=None
-    )
+    st.metric("Avg Coverage", f"${avg_coverage:,.0f}")
 
 with col3:
     high_risk = len(df[df['risk_count'] >= 3])
-    st.metric(
-        label="High Risk",
-        value=f"{high_risk:,}",
-        delta=None,
-        delta_color="inverse"
-    )
+    st.metric("High Risk", f"{high_risk:,}")
 
 with col4:
     upsell_candidates = len(df[df['upsell_count'] >= 2])
-    st.metric(
-        label="Upsell Opportunities",
-        value=f"{upsell_candidates:,}",
-        delta=None,
-        delta_color="normal"
-    )
+    st.metric("Upsell Opportunities", f"{upsell_candidates:,}")
 
 st.markdown("---")
 
-# Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Overview", "🎯 Upsell Opportunities", "⚠️ Risk Analysis", "🤖 AI Chat"])
+# Navigation - Now with 6 tabs
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Overview & Trends", 
+    "🗺️ Geographic Heatmap",
+    "📈 Portfolio Analysis", 
+    "🎯 Upsell Opportunities", 
+    "⚠️ Risk Analysis", 
+    "🤖 AI Chat"
+])
 
+# TAB 1: OVERVIEW & TRENDS (NEW)
 with tab1:
+    st.markdown("## 📊 Portfolio Overview & Trends")
+    
+    # Time-based metrics
+    if 'date_field' in df.columns:
+        df_sorted = df.sort_values('date_field')
+        
+        # Monthly trends
+        df['month'] = df['date_field'].dt.to_period('M').astype(str)
+        monthly_stats = df.groupby('month').agg({
+            'primary_full_name': 'count',
+            'insurance_face_amount': 'mean',
+            'risk_count': 'mean'
+        }).reset_index()
+        monthly_stats.columns = ['Month', 'New Customers', 'Avg Coverage', 'Avg Risk Score']
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 📈 Customer Acquisition Trend")
+            fig = px.line(monthly_stats, x='Month', y='New Customers',
+                         markers=True, color_discrete_sequence=[BURNT_ORANGE])
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("### 💰 Average Coverage Over Time")
+            fig = px.line(monthly_stats, x='Month', y='Avg Coverage',
+                         markers=True, color_discrete_sequence=[CHARCOAL_GRAY])
+            fig.update_layout(showlegend=False, yaxis_tickprefix="$")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### ⚠️ Risk Score Trend")
+            fig = px.line(monthly_stats, x='Month', y='Avg Risk Score',
+                         markers=True, color_discrete_sequence=['#d32f2f'])
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("### 📊 Policy Type Distribution Over Time")
+            if 'policy_type' in df.columns:
+                policy_monthly = df.groupby(['month', 'policy_type']).size().reset_index(name='count')
+                fig = px.area(policy_monthly, x='month', y='count', color='policy_type',
+                            color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
+                fig.update_layout(xaxis_title="Month", yaxis_title="Count")
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # Key insights summary
+    st.markdown("---")
+    st.markdown("### 🔑 Key Portfolio Insights")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if 'age' in df.columns:
+            avg_age = df['age'].mean()
+            st.metric("Average Customer Age", f"{avg_age:.1f} years")
+            age_trend = "↗️ Increasing" if df.groupby('month')['age'].mean().diff().mean() > 0 else "↘️ Decreasing"
+            st.caption(f"Trend: {age_trend}")
+    
+    with col2:
+        total_coverage = df['insurance_face_amount'].sum() if 'insurance_face_amount' in df else 0
+        st.metric("Total Portfolio Value", f"${total_coverage:,.0f}")
+        
+    with col3:
+        if 'policy_type' in df.columns:
+            top_policy = df['policy_type'].mode()[0]
+            st.metric("Most Popular Policy", top_policy)
+            pct = (df['policy_type'] == top_policy).sum() / len(df) * 100
+            st.caption(f"{pct:.1f}% of portfolio")
+
+# TAB 2: GEOGRAPHIC HEATMAP (NEW)
+with tab2:
+    st.markdown("## 🗺️ Geographic Distribution")
+    
+    if 'state' in df.columns:
+        # State-level aggregation
+        state_stats = df.groupby('state').agg({
+            'primary_full_name': 'count',
+            'insurance_face_amount': 'mean',
+            'risk_count': 'mean',
+            'upsell_count': 'mean'
+        }).reset_index()
+        state_stats.columns = ['state', 'Customer Count', 'Avg Coverage', 'Avg Risk', 'Avg Upsell Opportunities']
+        
+        # USA Choropleth Map
+        st.markdown("### 🇺🇸 Customer Distribution by State")
+        
+        fig = go.Figure(data=go.Choropleth(
+            locations=state_stats['state'],
+            z=state_stats['Customer Count'],
+            locationmode='USA-states',
+            colorscale=[[0, '#EBFFF7'], [0.5, LIGHT_GRAY], [1, BURNT_ORANGE]],
+            colorbar_title="Customers",
+            marker_line_color='white',
+            marker_line_width=1.5
+        ))
+        
+        fig.update_layout(
+            geo=dict(
+                scope='usa',
+                projection=go.layout.geo.Projection(type='albers usa'),
+                showlakes=True,
+                lakecolor='rgb(255, 255, 255)'
+            ),
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Coverage Heatmap
+        st.markdown("### 💰 Average Coverage by State")
+        
+        fig = go.Figure(data=go.Choropleth(
+            locations=state_stats['state'],
+            z=state_stats['Avg Coverage'],
+            locationmode='USA-states',
+            colorscale=[[0, '#EBFFF7'], [0.5, '#FFD700'], [1, '#228B22']],
+            colorbar_title="Avg Coverage ($)",
+            marker_line_color='white',
+            marker_line_width=1.5
+        ))
+        
+        fig.update_layout(
+            geo=dict(
+                scope='usa',
+                projection=go.layout.geo.Projection(type='albers usa'),
+                showlakes=True,
+                lakecolor='rgb(255, 255, 255)'
+            ),
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Risk Heatmap
+        st.markdown("### ⚠️ Risk Distribution by State")
+        
+        fig = go.Figure(data=go.Choropleth(
+            locations=state_stats['state'],
+            z=state_stats['Avg Risk'],
+            locationmode='USA-states',
+            colorscale=[[0, '#90EE90'], [0.5, '#FFD700'], [1, '#d32f2f']],
+            colorbar_title="Avg Risk Score",
+            marker_line_color='white',
+            marker_line_width=1.5
+        ))
+        
+        fig.update_layout(
+            geo=dict(
+                scope='usa',
+                projection=go.layout.geo.Projection(type='albers usa'),
+                showlakes=True,
+                lakecolor='rgb(255, 255, 255)'
+            ),
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Top States Table
+        st.markdown("---")
+        st.markdown("### 🏆 Top States by Customer Count")
+        
+        top_states = state_stats.nlargest(10, 'Customer Count')
+        top_states['Avg Coverage'] = top_states['Avg Coverage'].apply(lambda x: f"${x:,.0f}")
+        top_states['Avg Risk'] = top_states['Avg Risk'].apply(lambda x: f"{x:.2f}")
+        top_states['Avg Upsell Opportunities'] = top_states['Avg Upsell Opportunities'].apply(lambda x: f"{x:.2f}")
+        
+        st.dataframe(top_states, use_container_width=True, hide_index=True)
+
+# TAB 3: PORTFOLIO ANALYSIS (Original Overview)
+with tab3:
     st.markdown("## 🤖 AI-Generated Insights")
     
     col1, col2 = st.columns([4, 1])
@@ -437,7 +590,8 @@ with tab1:
         fig.update_layout(showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
-with tab2:
+# TAB 4: UPSELL OPPORTUNITIES
+with tab4:
     st.markdown("## 🎯 Upsell Opportunities")
     
     upsell_df = df[df['upsell_count'] >= 2].sort_values('upsell_count', ascending=False)
@@ -445,7 +599,6 @@ with tab2:
     st.markdown(f"### Found {len(upsell_df)} customers with 2+ upsell opportunities")
     
     if len(upsell_df) > 0:
-        # Opportunity breakdown
         all_opportunities = []
         for opps in upsell_df['upsell_opportunities']:
             all_opportunities.extend(opps)
@@ -469,18 +622,14 @@ with tab2:
         st.markdown("---")
         st.markdown("#### Top Upsell Candidates")
         
-        # Display table
         display_cols = ['primary_full_name', 'age', 'insurance_face_amount', 'policy_type', 
                        'upsell_count', 'upsell_opportunities']
         available_cols = [col for col in display_cols if col in upsell_df.columns]
         
-        st.dataframe(
-            upsell_df[available_cols].head(20),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(upsell_df[available_cols].head(20), use_container_width=True, hide_index=True)
 
-with tab3:
+# TAB 5: RISK ANALYSIS
+with tab5:
     st.markdown("## ⚠️ Risk Analysis")
     
     high_risk = df[df['risk_count'] >= 3]
@@ -500,7 +649,6 @@ with tab3:
     
     st.markdown("---")
     
-    # Risk factor breakdown
     all_risks = []
     for risks in df['risk_factors']:
         all_risks.extend(risks)
@@ -530,15 +678,12 @@ with tab3:
                        'risk_count', 'risk_factors']
         available_cols = [col for col in display_cols if col in high_risk.columns]
         
-        st.dataframe(
-            high_risk[available_cols].head(20),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(high_risk[available_cols].head(20), use_container_width=True, hide_index=True)
     else:
         st.success("✅ No high-risk customers found!")
 
-with tab4:
+# TAB 6: AI CHAT
+with tab6:
     st.markdown("## 🤖 AI Assistant")
     st.markdown("Ask questions about your life insurance portfolio and get AI-powered insights.")
     
@@ -547,11 +692,9 @@ with tab4:
     if claude_client is None:
         st.warning("⚠️ AI chat unavailable. Please configure ANTHROPIC_API_KEY in Streamlit secrets.")
     else:
-        # Initialize chat history
         if 'chat_history' not in st.session_state:
             st.session_state['chat_history'] = []
         
-        # Display chat history
         for message in st.session_state['chat_history']:
             if message['role'] == 'user':
                 st.markdown(f"""
@@ -566,7 +709,6 @@ with tab4:
                     </div>
                 """, unsafe_allow_html=True)
         
-        # Chat input
         user_query = st.text_input("Ask a question:", key="chat_input")
         
         col1, col2 = st.columns([1, 5])
@@ -575,7 +717,6 @@ with tab4:
                 if user_query:
                     st.session_state['chat_history'].append({'role': 'user', 'content': user_query})
                     
-                    # Generate AI response
                     with st.spinner("Thinking..."):
                         try:
                             messages = [{"role": msg['role'], "content": msg['content']} 
@@ -599,7 +740,6 @@ with tab4:
                 st.session_state['chat_history'] = []
                 st.rerun()
         
-        # Suggested questions
         if len(st.session_state['chat_history']) == 0:
             st.markdown("---")
             st.markdown("#### 💡 Suggested Questions")
