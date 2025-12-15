@@ -356,9 +356,90 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 # TAB 1: OVERVIEW & TRENDS (NEW)
 with tab1:
-    st.markdown("## 📊 Portfolio Overview & Trends")
+    st.markdown("## 📊 Executive Summary & Key Insights")
     
-    # Time-based metrics
+    # Generate AI insights for the overview
+    claude_client = get_claude_client()
+    
+    if claude_client and 'overview_insights' not in st.session_state:
+        with st.spinner("🤖 Analyzing your portfolio trends..."):
+            # Calculate trend metrics
+            if 'date_field' in df.columns:
+                df_sorted = df.sort_values('date_field')
+                df['month'] = df['date_field'].dt.to_period('M').astype(str)
+                monthly_stats = df.groupby('month').agg({
+                    'primary_full_name': 'count',
+                    'insurance_face_amount': 'mean',
+                    'risk_count': 'mean'
+                }).reset_index()
+                
+                # Calculate trends
+                customer_trend = monthly_stats['primary_full_name'].pct_change().mean() * 100
+                coverage_trend = monthly_stats['insurance_face_amount'].pct_change().mean() * 100
+                risk_trend = monthly_stats['risk_count'].diff().mean()
+                
+                recent_month = monthly_stats.iloc[-1]
+                prev_month = monthly_stats.iloc[-2] if len(monthly_stats) > 1 else recent_month
+                
+                prompt = f"""You are analyzing a life insurance portfolio. Provide a clear executive summary with actionable insights.
+
+Portfolio Metrics:
+- Total Customers: {len(df):,}
+- Total Portfolio Value: ${df['insurance_face_amount'].sum():,.0f}
+- Average Coverage: ${df['insurance_face_amount'].mean():,.0f}
+- Average Customer Age: {df['age'].mean():.1f} years
+
+Trends (Month-over-Month):
+- Customer Growth: {customer_trend:+.1f}% average monthly change
+- Coverage Trend: {coverage_trend:+.1f}% average monthly change  
+- Risk Score Trend: {risk_trend:+.2f} change in risk score
+
+Recent Performance:
+- Last Month: {recent_month['primary_full_name']:.0f} customers, ${recent_month['insurance_face_amount']:,.0f} avg coverage
+- Previous Month: {prev_month['primary_full_name']:.0f} customers, ${prev_month['insurance_face_amount']:,.0f} avg coverage
+
+Top Policy Type: {df['policy_type'].mode()[0]} ({(df['policy_type'] == df['policy_type'].mode()[0]).sum() / len(df) * 100:.1f}%)
+
+Provide 4-5 bullet points that:
+1. Start with the most important finding (what matters most right now)
+2. Explain trends in plain English (avoid jargon)
+3. Give specific, actionable recommendations
+4. Highlight risks or opportunities
+5. Answer "so what?" for each insight
+
+Format as clear bullets starting with bold action words like "⚠️ Address:", "💡 Opportunity:", "📈 Trend:", etc."""
+                
+                try:
+                    message = claude_client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=1500,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    st.session_state['overview_insights'] = message.content[0].text
+                except Exception as e:
+                    st.session_state['overview_insights'] = "Unable to generate insights at this time."
+    
+    # Display AI insights prominently
+    col1, col2 = st.columns([5, 1])
+    with col2:
+        if st.button("🔄 Refresh", key="refresh_overview"):
+            if 'overview_insights' in st.session_state:
+                del st.session_state['overview_insights']
+            st.rerun()
+    
+    if 'overview_insights' in st.session_state:
+        st.markdown(f"""
+            <div class="insight-box">
+                <h3 style="color: white; margin-top: 0;">🎯 What You Need to Know</h3>
+                {st.session_state['overview_insights'].replace(chr(10), '<br>')}
+            </div>
+        """, unsafe_allow_html=True)
+    elif not claude_client:
+        st.info("💡 **Quick Insights:** Connect your API key to get AI-powered executive summaries of your portfolio trends.")
+    
+    st.markdown("---")
+    
+    # Time-based metrics with narrative
     if 'date_field' in df.columns:
         df_sorted = df.sort_values('date_field')
         
@@ -371,163 +452,443 @@ with tab1:
         }).reset_index()
         monthly_stats.columns = ['Month', 'New Customers', 'Avg Coverage', 'Avg Risk Score']
         
+        # Calculate trend direction
+        if len(monthly_stats) >= 2:
+            customer_change = ((monthly_stats['New Customers'].iloc[-1] - monthly_stats['New Customers'].iloc[0]) / 
+                             monthly_stats['New Customers'].iloc[0] * 100)
+            coverage_change = ((monthly_stats['Avg Coverage'].iloc[-1] - monthly_stats['Avg Coverage'].iloc[0]) / 
+                             monthly_stats['Avg Coverage'].iloc[0] * 100)
+            risk_change = monthly_stats['Avg Risk Score'].iloc[-1] - monthly_stats['Avg Risk Score'].iloc[0]
+        
+        st.markdown("### 📈 Trend Analysis")
+        
+        # Customer Acquisition with insight
+        st.markdown(f"""
+        **Customer Growth Trajectory**
+        {f"📈 Up {customer_change:.1f}% from baseline" if customer_change > 0 else f"📉 Down {abs(customer_change):.1f}% from baseline"}
+        """)
+        
+        fig = px.line(monthly_stats, x='Month', y='New Customers',
+                     markers=True, color_discrete_sequence=[BURNT_ORANGE])
+        fig.update_layout(showlegend=False, height=300)
+        st.plotly_chart(fig, use_container_width=True)
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### 📈 Customer Acquisition Trend")
-            fig = px.line(monthly_stats, x='Month', y='New Customers',
-                         markers=True, color_discrete_sequence=[BURNT_ORANGE])
-            fig.update_layout(showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.markdown("### 💰 Average Coverage Over Time")
+            st.markdown(f"""
+            **Coverage Trends**
+            {f"💰 Average coverage {'increased' if coverage_change > 0 else 'decreased'} by {abs(coverage_change):.1f}%"}
+            """)
             fig = px.line(monthly_stats, x='Month', y='Avg Coverage',
                          markers=True, color_discrete_sequence=[CHARCOAL_GRAY])
-            fig.update_layout(showlegend=False, yaxis_tickprefix="$")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### ⚠️ Risk Score Trend")
-            fig = px.line(monthly_stats, x='Month', y='Avg Risk Score',
-                         markers=True, color_discrete_sequence=['#d32f2f'])
-            fig.update_layout(showlegend=False)
+            fig.update_layout(showlegend=False, yaxis_tickprefix="$", height=300)
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            st.markdown("### 📊 Policy Type Distribution Over Time")
-            if 'policy_type' in df.columns:
-                policy_monthly = df.groupby(['month', 'policy_type']).size().reset_index(name='count')
-                fig = px.area(policy_monthly, x='month', y='count', color='policy_type',
-                            color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
-                fig.update_layout(xaxis_title="Month", yaxis_title="Count")
-                st.plotly_chart(fig, use_container_width=True)
+            st.markdown(f"""
+            **Risk Profile Changes**
+            {f"⚠️ Risk score {'increased' if risk_change > 0 else 'decreased'} by {abs(risk_change):.2f} points"}
+            """)
+            fig = px.line(monthly_stats, x='Month', y='Avg Risk Score',
+                         markers=True, color_discrete_sequence=['#d32f2f'])
+            fig.update_layout(showlegend=False, height=300)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Policy mix analysis
+        if 'policy_type' in df.columns:
+            st.markdown("---")
+            st.markdown("### 📊 Portfolio Composition")
+            
+            policy_monthly = df.groupby(['month', 'policy_type']).size().reset_index(name='count')
+            
+            # Calculate policy mix insights
+            latest_month = policy_monthly[policy_monthly['month'] == policy_monthly['month'].max()]
+            policy_leader = latest_month.nlargest(1, 'count')['policy_type'].values[0]
+            policy_leader_pct = latest_month.nlargest(1, 'count')['count'].values[0] / latest_month['count'].sum() * 100
+            
+            st.markdown(f"""
+            **Current Mix:** {policy_leader} dominates at {policy_leader_pct:.1f}% of new policies
+            """)
+            
+            fig = px.area(policy_monthly, x='month', y='count', color='policy_type',
+                        color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
+            fig.update_layout(xaxis_title="Month", yaxis_title="Count", height=300)
+            st.plotly_chart(fig, use_container_width=True)
     
-    # Key insights summary
+    # Key metrics with context
     st.markdown("---")
-    st.markdown("### 🔑 Key Portfolio Insights")
+    st.markdown("### 🎯 Portfolio Snapshot")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         if 'age' in df.columns:
             avg_age = df['age'].mean()
-            st.metric("Average Customer Age", f"{avg_age:.1f} years")
-            age_trend = "↗️ Increasing" if df.groupby('month')['age'].mean().diff().mean() > 0 else "↘️ Decreasing"
-            st.caption(f"Trend: {age_trend}")
+            age_segment = "Young" if avg_age < 35 else "Mid-Career" if avg_age < 55 else "Pre-Retirement"
+            st.metric("Avg Customer Age", f"{avg_age:.1f} years", f"{age_segment} Focus")
     
     with col2:
         total_coverage = df['insurance_face_amount'].sum() if 'insurance_face_amount' in df else 0
-        st.metric("Total Portfolio Value", f"${total_coverage:,.0f}")
+        avg_per_customer = total_coverage / len(df)
+        st.metric("Total Portfolio Value", f"${total_coverage:,.0f}", f"${avg_per_customer:,.0f}/customer")
         
     with col3:
         if 'policy_type' in df.columns:
             top_policy = df['policy_type'].mode()[0]
-            st.metric("Most Popular Policy", top_policy)
             pct = (df['policy_type'] == top_policy).sum() / len(df) * 100
-            st.caption(f"{pct:.1f}% of portfolio")
+            st.metric("Leading Policy Type", top_policy, f"{pct:.1f}% share")
+    
+    with col4:
+        high_value = len(df[df['insurance_face_amount'] > df['insurance_face_amount'].median()])
+        pct_high_value = high_value / len(df) * 100
+        st.metric("High-Value Customers", f"{high_value:,}", f"{pct_high_value:.1f}% of base")
 
 # TAB 2: GEOGRAPHIC HEATMAP (NEW)
 with tab2:
-    st.markdown("## 🗺️ Geographic Distribution")
+    st.markdown("## 🗺️ Geographic Distribution & Performance")
     
     if 'state' in df.columns:
         # State-level aggregation
         state_stats = df.groupby('state').agg({
             'primary_full_name': 'count',
-            'insurance_face_amount': 'mean',
+            'insurance_face_amount': ['sum', 'mean'],
             'risk_count': 'mean',
             'upsell_count': 'mean'
         }).reset_index()
-        state_stats.columns = ['state', 'Customer Count', 'Avg Coverage', 'Avg Risk', 'Avg Upsell Opportunities']
         
-        # USA Choropleth Map
-        st.markdown("### 🇺🇸 Customer Distribution by State")
+        state_stats.columns = ['state', 'Customer Count', 'Total Coverage', 'Avg Coverage', 'Avg Risk', 'Avg Upsell Opportunities']
         
-        fig = go.Figure(data=go.Choropleth(
-            locations=state_stats['state'],
-            z=state_stats['Customer Count'],
-            locationmode='USA-states',
-            colorscale=[[0, '#EBFFF7'], [0.5, LIGHT_GRAY], [1, BURNT_ORANGE]],
-            colorbar_title="Customers",
-            marker_line_color='white',
-            marker_line_width=1.5
-        ))
+        # Calculate additional metrics for hover
+        state_stats['Coverage per Customer'] = state_stats['Total Coverage'] / state_stats['Customer Count']
+        state_stats['Market Share %'] = (state_stats['Customer Count'] / state_stats['Customer Count'].sum() * 100).round(2)
         
-        fig.update_layout(
-            geo=dict(
-                scope='usa',
-                projection=go.layout.geo.Projection(type='albers usa'),
-                showlakes=True,
-                lakecolor='rgb(255, 255, 255)'
-            ),
-            height=500
+        # Create hover text template
+        def create_hover_text(row):
+            return (
+                f"<b>{row['state']}</b><br>"
+                f"Customers: {row['Customer Count']:,}<br>"
+                f"Market Share: {row['Market Share %']:.1f}%<br>"
+                f"Total Coverage: ${row['Total Coverage']:,.0f}<br>"
+                f"Avg Coverage: ${row['Avg Coverage']:,.0f}<br>"
+                f"Risk Score: {row['Avg Risk']:.2f}<br>"
+                f"Upsell Opps: {row['Avg Upsell Opportunities']:.2f}"
+            )
+        
+        state_stats['hover_text'] = state_stats.apply(create_hover_text, axis=1)
+        
+        # Map selector - one view at a time
+        st.markdown("### Select View")
+        map_view = st.selectbox(
+            "Choose which metric to visualize:",
+            ["Customer Distribution", "Total Portfolio Value", "Average Coverage per Customer", "Risk Distribution"],
+            key="map_selector"
         )
         
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Coverage Heatmap
-        st.markdown("### 💰 Average Coverage by State")
-        
-        fig = go.Figure(data=go.Choropleth(
-            locations=state_stats['state'],
-            z=state_stats['Avg Coverage'],
-            locationmode='USA-states',
-            colorscale=[[0, '#EBFFF7'], [0.5, '#FFD700'], [1, '#228B22']],
-            colorbar_title="Avg Coverage ($)",
-            marker_line_color='white',
-            marker_line_width=1.5
-        ))
-        
-        fig.update_layout(
-            geo=dict(
-                scope='usa',
-                projection=go.layout.geo.Projection(type='albers usa'),
-                showlakes=True,
-                lakecolor='rgb(255, 255, 255)'
-            ),
-            height=500
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Risk Heatmap
-        st.markdown("### ⚠️ Risk Distribution by State")
-        
-        fig = go.Figure(data=go.Choropleth(
-            locations=state_stats['state'],
-            z=state_stats['Avg Risk'],
-            locationmode='USA-states',
-            colorscale=[[0, '#90EE90'], [0.5, '#FFD700'], [1, '#d32f2f']],
-            colorbar_title="Avg Risk Score",
-            marker_line_color='white',
-            marker_line_width=1.5
-        ))
-        
-        fig.update_layout(
-            geo=dict(
-                scope='usa',
-                projection=go.layout.geo.Projection(type='albers usa'),
-                showlakes=True,
-                lakecolor='rgb(255, 255, 255)'
-            ),
-            height=500
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Top States Table
         st.markdown("---")
-        st.markdown("### 🏆 Top States by Customer Count")
         
-        top_states = state_stats.nlargest(10, 'Customer Count')
-        top_states['Avg Coverage'] = top_states['Avg Coverage'].apply(lambda x: f"${x:,.0f}")
-        top_states['Avg Risk'] = top_states['Avg Risk'].apply(lambda x: f"{x:.2f}")
-        top_states['Avg Upsell Opportunities'] = top_states['Avg Upsell Opportunities'].apply(lambda x: f"{x:.2f}")
+        # Display selected map - LARGE SIZE
+        if map_view == "Customer Distribution":
+            st.markdown("### 🇺🇸 Customer Distribution by State")
+            st.caption("Hover over states for detailed metrics • Darker colors = more customers")
+            
+            fig = go.Figure(data=go.Choropleth(
+                locations=state_stats['state'],
+                z=state_stats['Customer Count'],
+                locationmode='USA-states',
+                colorscale=[
+                    [0, '#deebf7'],      # Very light blue
+                    [0.2, '#9ecae1'],    # Light blue
+                    [0.4, '#4292c6'],    # Medium blue
+                    [0.6, '#2171b5'],    # Blue
+                    [0.8, '#08519c'],    # Dark blue
+                    [1, '#08306b']       # Very dark blue
+                ],
+                text=state_stats['state'],
+                hovertext=state_stats['hover_text'],
+                hoverinfo='text',
+                colorbar=dict(
+                    title="<b>Customers</b>",
+                    thickness=25,
+                    len=0.8,
+                    bgcolor='rgba(255,255,255,0.9)',
+                    tickfont=dict(size=13),
+                    titlefont=dict(size=14, family='Poppins, sans-serif')
+                ),
+                marker=dict(
+                    line=dict(
+                        color='#ffffff',
+                        width=2
+                    )
+                )
+            ))
+            
+            fig.update_layout(
+                geo=dict(
+                    scope='usa',
+                    projection=go.layout.geo.Projection(type='albers usa'),
+                    showlakes=True,
+                    lakecolor='#e6f2ff',
+                    bgcolor='#f8f9fa',
+                    landcolor='#f0f0f0',
+                    coastlinecolor='#cccccc',
+                    coastlinewidth=1
+                ),
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                height=700,
+                margin=dict(l=0, r=0, t=40, b=0),
+                font=dict(family='Poppins, sans-serif', size=13)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Key metrics for this view
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                top_state = state_stats.nlargest(1, 'Customer Count')['state'].values[0]
+                top_count = state_stats.nlargest(1, 'Customer Count')['Customer Count'].values[0]
+                st.metric("🏆 Top State", top_state, f"{top_count:,} customers")
+            with col2:
+                total_customers = state_stats['Customer Count'].sum()
+                st.metric("👥 Total Customers", f"{total_customers:,}")
+            with col3:
+                states_with_customers = len(state_stats)
+                st.metric("📍 States with Customers", f"{states_with_customers}")
         
-        st.dataframe(top_states, use_container_width=True, hide_index=True)
+        elif map_view == "Total Portfolio Value":
+            st.markdown("### 💰 Total Portfolio Value by State")
+            st.caption("Total insurance coverage amount per state • Green intensity shows market value")
+            
+            fig = go.Figure(data=go.Choropleth(
+                locations=state_stats['state'],
+                z=state_stats['Total Coverage'],
+                locationmode='USA-states',
+                colorscale=[
+                    [0, '#f7fcf5'],      # Very light green
+                    [0.2, '#c7e9c0'],    # Light green
+                    [0.4, '#74c476'],    # Medium light green
+                    [0.6, '#31a354'],    # Medium green
+                    [0.8, '#006d2c'],    # Dark green
+                    [1, '#00441b']       # Very dark green
+                ],
+                text=state_stats['state'],
+                hovertext=state_stats['hover_text'],
+                hoverinfo='text',
+                colorbar=dict(
+                    title="<b>Total Value</b>",
+                    thickness=25,
+                    len=0.8,
+                    bgcolor='rgba(255,255,255,0.9)',
+                    tickformat='$,.0f',
+                    tickfont=dict(size=13),
+                    titlefont=dict(size=14, family='Poppins, sans-serif')
+                ),
+                marker=dict(
+                    line=dict(
+                        color='#ffffff',
+                        width=2
+                    )
+                )
+            ))
+            
+            fig.update_layout(
+                geo=dict(
+                    scope='usa',
+                    projection=go.layout.geo.Projection(type='albers usa'),
+                    showlakes=True,
+                    lakecolor='#e6f2ff',
+                    bgcolor='#f8f9fa',
+                    landcolor='#f0f0f0',
+                    coastlinecolor='#cccccc',
+                    coastlinewidth=1
+                ),
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                height=700,
+                margin=dict(l=0, r=0, t=40, b=0),
+                font=dict(family='Poppins, sans-serif', size=13)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Key metrics for this view
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                highest_value_state = state_stats.nlargest(1, 'Total Coverage')['state'].values[0]
+                highest_value = state_stats.nlargest(1, 'Total Coverage')['Total Coverage'].values[0]
+                st.metric("🏆 Highest Value State", highest_value_state, f"${highest_value:,.0f}")
+            with col2:
+                total_portfolio = state_stats['Total Coverage'].sum()
+                st.metric("💼 Total Portfolio", f"${total_portfolio:,.0f}")
+            with col3:
+                avg_state_value = state_stats['Total Coverage'].mean()
+                st.metric("📊 Avg State Value", f"${avg_state_value:,.0f}")
+        
+        elif map_view == "Average Coverage per Customer":
+            st.markdown("### 📊 Average Coverage per Customer")
+            st.caption("Average policy value by state • Orange intensity shows premium customers")
+            
+            fig = go.Figure(data=go.Choropleth(
+                locations=state_stats['state'],
+                z=state_stats['Avg Coverage'],
+                locationmode='USA-states',
+                colorscale=[
+                    [0, '#fff5eb'],      # Very light orange
+                    [0.2, '#fee6ce'],    # Light orange
+                    [0.4, '#fdd0a2'],    # Light medium orange
+                    [0.6, '#fdae6b'],    # Medium orange
+                    [0.8, '#e6550d'],    # Dark orange (Syntex brand)
+                    [1, '#a63603']       # Very dark orange
+                ],
+                text=state_stats['state'],
+                hovertext=state_stats['hover_text'],
+                hoverinfo='text',
+                colorbar=dict(
+                    title="<b>Avg Coverage</b>",
+                    thickness=25,
+                    len=0.8,
+                    bgcolor='rgba(255,255,255,0.9)',
+                    tickformat='$,.0f',
+                    tickfont=dict(size=13),
+                    titlefont=dict(size=14, family='Poppins, sans-serif')
+                ),
+                marker=dict(
+                    line=dict(
+                        color='#ffffff',
+                        width=2
+                    )
+                )
+            ))
+            
+            fig.update_layout(
+                geo=dict(
+                    scope='usa',
+                    projection=go.layout.geo.Projection(type='albers usa'),
+                    showlakes=True,
+                    lakecolor='#e6f2ff',
+                    bgcolor='#f8f9fa',
+                    landcolor='#f0f0f0',
+                    coastlinecolor='#cccccc',
+                    coastlinewidth=1
+                ),
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                height=700,
+                margin=dict(l=0, r=0, t=40, b=0),
+                font=dict(family='Poppins, sans-serif', size=13)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Key metrics for this view
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                highest_avg_state = state_stats.nlargest(1, 'Avg Coverage')['state'].values[0]
+                highest_avg = state_stats.nlargest(1, 'Avg Coverage')['Avg Coverage'].values[0]
+                st.metric("🏆 Premium Market", highest_avg_state, f"${highest_avg:,.0f} avg")
+            with col2:
+                overall_avg = state_stats['Avg Coverage'].mean()
+                st.metric("📊 National Average", f"${overall_avg:,.0f}")
+            with col3:
+                premium_states = len(state_stats[state_stats['Avg Coverage'] > overall_avg])
+                st.metric("⭐ Above Average States", f"{premium_states}")
+        
+        elif map_view == "Risk Distribution":
+            st.markdown("### ⚠️ Risk Distribution by State")
+            st.caption("Average risk score per state • Red = high risk, Yellow = medium, Green = low risk")
+            
+            fig = go.Figure(data=go.Choropleth(
+                locations=state_stats['state'],
+                z=state_stats['Avg Risk'],
+                locationmode='USA-states',
+                colorscale=[
+                    [0, '#1a9850'],      # Dark green (low risk)
+                    [0.25, '#91cf60'],   # Light green
+                    [0.5, '#ffffbf'],    # Yellow (medium risk)
+                    [0.75, '#fc8d59'],   # Orange
+                    [1, '#d73027']       # Red (high risk)
+                ],
+                text=state_stats['state'],
+                hovertext=state_stats['hover_text'],
+                hoverinfo='text',
+                colorbar=dict(
+                    title="<b>Risk Score</b>",
+                    thickness=25,
+                    len=0.8,
+                    bgcolor='rgba(255,255,255,0.9)',
+                    tickfont=dict(size=13),
+                    titlefont=dict(size=14, family='Poppins, sans-serif')
+                ),
+                marker=dict(
+                    line=dict(
+                        color='#ffffff',
+                        width=2
+                    )
+                ),
+                zmid=state_stats['Avg Risk'].median()  # Center the color scale at median
+            ))
+            
+            fig.update_layout(
+                geo=dict(
+                    scope='usa',
+                    projection=go.layout.geo.Projection(type='albers usa'),
+                    showlakes=True,
+                    lakecolor='#e6f2ff',
+                    bgcolor='#f8f9fa',
+                    landcolor='#f0f0f0',
+                    coastlinecolor='#cccccc',
+                    coastlinewidth=1
+                ),
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                height=700,
+                margin=dict(l=0, r=0, t=40, b=0),
+                font=dict(family='Poppins, sans-serif', size=13)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Key metrics for this view
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                highest_risk_state = state_stats.nlargest(1, 'Avg Risk')['state'].values[0]
+                highest_risk = state_stats.nlargest(1, 'Avg Risk')['Avg Risk'].values[0]
+                st.metric("⚠️ Highest Risk State", highest_risk_state, f"{highest_risk:.2f} risk score")
+            with col2:
+                avg_risk = state_stats['Avg Risk'].mean()
+                st.metric("📊 National Avg Risk", f"{avg_risk:.2f}")
+            with col3:
+                high_risk_states = len(state_stats[state_stats['Avg Risk'] >= 2.5])
+                st.metric("🚨 High Risk States", f"{high_risk_states}")
+        
+        # Summary Table - always show below the map
+        st.markdown("---")
+        st.markdown("### 📈 State Performance Summary")
+        
+        # Create a sortable, formatted table
+        summary_table = state_stats[['state', 'Customer Count', 'Market Share %', 'Total Coverage', 
+                                     'Avg Coverage', 'Avg Risk', 'Avg Upsell Opportunities']].copy()
+        summary_table = summary_table.sort_values('Customer Count', ascending=False)
+        
+        # Format the columns
+        summary_table['Customer Count'] = summary_table['Customer Count'].apply(lambda x: f"{x:,}")
+        summary_table['Market Share %'] = summary_table['Market Share %'].apply(lambda x: f"{x:.1f}%")
+        summary_table['Total Coverage'] = summary_table['Total Coverage'].apply(lambda x: f"${x:,.0f}")
+        summary_table['Avg Coverage'] = summary_table['Avg Coverage'].apply(lambda x: f"${x:,.0f}")
+        summary_table['Avg Risk'] = summary_table['Avg Risk'].apply(lambda x: f"{x:.2f}")
+        summary_table['Avg Upsell Opportunities'] = summary_table['Avg Upsell Opportunities'].apply(lambda x: f"{x:.2f}")
+        
+        # Rename columns for display
+        summary_table.columns = ['State', 'Customers', 'Market Share', 'Total Portfolio Value', 
+                                'Avg Policy Value', 'Risk Score', 'Upsell Opportunities']
+        
+        st.dataframe(
+            summary_table,
+            use_container_width=True, 
+            hide_index=True,
+            height=400
+        )
 
 # TAB 3: PORTFOLIO ANALYSIS (Original Overview)
 with tab3:
