@@ -616,31 +616,12 @@ with tab2:
                 locations=state_stats['state'],
                 z=state_stats['Customer Count'],
                 locationmode='USA-states',
-                colorscale=[
-                    [0, '#deebf7'],      # Very light blue
-                    [0.2, '#9ecae1'],    # Light blue
-                    [0.4, '#4292c6'],    # Medium blue
-                    [0.6, '#2171b5'],    # Blue
-                    [0.8, '#08519c'],    # Dark blue
-                    [1, '#08306b']       # Very dark blue
-                ],
+                colorscale='Blues',
                 text=state_stats['state'],
                 hovertext=state_stats['hover_text'],
                 hoverinfo='text',
-                colorbar=dict(
-                    title="<b>Customers</b>",
-                    thickness=25,
-                    len=0.8,
-                    bgcolor='rgba(255,255,255,0.9)',
-                    tickfont=dict(size=13),
-                    titlefont=dict(size=14, family='Poppins, sans-serif')
-                ),
-                marker=dict(
-                    line=dict(
-                        color='#ffffff',
-                        width=2
-                    )
-                )
+                marker_line_color='white',
+                marker_line_width=2
             ))
             
             fig.update_layout(
@@ -684,32 +665,12 @@ with tab2:
                 locations=state_stats['state'],
                 z=state_stats['Total Coverage'],
                 locationmode='USA-states',
-                colorscale=[
-                    [0, '#f7fcf5'],      # Very light green
-                    [0.2, '#c7e9c0'],    # Light green
-                    [0.4, '#74c476'],    # Medium light green
-                    [0.6, '#31a354'],    # Medium green
-                    [0.8, '#006d2c'],    # Dark green
-                    [1, '#00441b']       # Very dark green
-                ],
+                colorscale='Greens',
                 text=state_stats['state'],
                 hovertext=state_stats['hover_text'],
                 hoverinfo='text',
-                colorbar=dict(
-                    title="<b>Total Value</b>",
-                    thickness=25,
-                    len=0.8,
-                    bgcolor='rgba(255,255,255,0.9)',
-                    tickformat='$,.0f',
-                    tickfont=dict(size=13),
-                    titlefont=dict(size=14, family='Poppins, sans-serif')
-                ),
-                marker=dict(
-                    line=dict(
-                        color='#ffffff',
-                        width=2
-                    )
-                )
+                marker_line_color='white',
+                marker_line_width=2
             ))
             
             fig.update_layout(
@@ -753,32 +714,12 @@ with tab2:
                 locations=state_stats['state'],
                 z=state_stats['Avg Coverage'],
                 locationmode='USA-states',
-                colorscale=[
-                    [0, '#fff5eb'],      # Very light orange
-                    [0.2, '#fee6ce'],    # Light orange
-                    [0.4, '#fdd0a2'],    # Light medium orange
-                    [0.6, '#fdae6b'],    # Medium orange
-                    [0.8, '#e6550d'],    # Dark orange (Syntex brand)
-                    [1, '#a63603']       # Very dark orange
-                ],
+                colorscale='Oranges',
                 text=state_stats['state'],
                 hovertext=state_stats['hover_text'],
                 hoverinfo='text',
-                colorbar=dict(
-                    title="<b>Avg Coverage</b>",
-                    thickness=25,
-                    len=0.8,
-                    bgcolor='rgba(255,255,255,0.9)',
-                    tickformat='$,.0f',
-                    tickfont=dict(size=13),
-                    titlefont=dict(size=14, family='Poppins, sans-serif')
-                ),
-                marker=dict(
-                    line=dict(
-                        color='#ffffff',
-                        width=2
-                    )
-                )
+                marker_line_color='white',
+                marker_line_width=2
             ))
             
             fig.update_layout(
@@ -822,31 +763,13 @@ with tab2:
                 locations=state_stats['state'],
                 z=state_stats['Avg Risk'],
                 locationmode='USA-states',
-                colorscale=[
-                    [0, '#1a9850'],      # Dark green (low risk)
-                    [0.25, '#91cf60'],   # Light green
-                    [0.5, '#ffffbf'],    # Yellow (medium risk)
-                    [0.75, '#fc8d59'],   # Orange
-                    [1, '#d73027']       # Red (high risk)
-                ],
+                colorscale='RdYlGn_r',
                 text=state_stats['state'],
                 hovertext=state_stats['hover_text'],
                 hoverinfo='text',
-                colorbar=dict(
-                    title="<b>Risk Score</b>",
-                    thickness=25,
-                    len=0.8,
-                    bgcolor='rgba(255,255,255,0.9)',
-                    tickfont=dict(size=13),
-                    titlefont=dict(size=14, family='Poppins, sans-serif')
-                ),
-                marker=dict(
-                    line=dict(
-                        color='#ffffff',
-                        width=2
-                    )
-                ),
-                zmid=state_stats['Avg Risk'].median()  # Center the color scale at median
+                marker_line_color='white',
+                marker_line_width=2,
+                zmid=state_stats['Avg Risk'].median()
             ))
             
             fig.update_layout(
