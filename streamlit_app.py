@@ -123,11 +123,30 @@ def load_persistent_data():
 
 # Initialize Anthropic client
 @st.cache_resource
+@st.cache_resource
 def get_claude_client():
-    api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
+    """Get Claude API client with proper error handling"""
+    try:
+        # Try to get API key from secrets first, then environment
+        api_key = None
+        
+        # Method 1: Streamlit secrets (most common in Streamlit Cloud)
+        if hasattr(st, 'secrets') and "ANTHROPIC_API_KEY" in st.secrets:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        
+        # Method 2: Environment variable (for local development)
+        if not api_key:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+        
+        # If no API key found, return None
+        if not api_key or api_key == "":
+            return None
+        
+        # Create and return client
+        return Anthropic(api_key=api_key)
+    except Exception as e:
+        st.error(f"Error initializing Claude client: {str(e)}")
         return None
-    return Anthropic(api_key=api_key)
 
 @st.cache_data
 def load_data(uploaded_file=None):
@@ -346,7 +365,7 @@ st.markdown("---")
 
 # Navigation - Now with 6 tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Overview & Trends", 
+    "📊 Executive Dashboard", 
     "🗺️ Geographic Heatmap",
     "📈 Portfolio Analysis", 
     "🎯 Upsell Opportunities", 
@@ -354,215 +373,371 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🤖 AI Chat"
 ])
 
-# TAB 1: OVERVIEW & TRENDS (NEW)
+# TAB 1: EXECUTIVE DASHBOARD (REDESIGNED)
 with tab1:
-    st.markdown("## 📊 Executive Summary & Key Insights")
+    st.markdown("## 📊 Executive Dashboard")
     
-    # Generate AI insights for the overview
+    # AI INSIGHTS BOX (Prominent at top)
     claude_client = get_claude_client()
     
     if claude_client and 'overview_insights' not in st.session_state:
         with st.spinner("🤖 Analyzing your portfolio trends..."):
-            # Calculate trend metrics
-            if 'date_field' in df.columns:
-                df_sorted = df.sort_values('date_field')
-                df['month'] = df['date_field'].dt.to_period('M').astype(str)
-                monthly_stats = df.groupby('month').agg({
-                    'primary_full_name': 'count',
-                    'insurance_face_amount': 'mean',
-                    'risk_count': 'mean'
-                }).reset_index()
-                
-                # Calculate trends
-                customer_trend = monthly_stats['primary_full_name'].pct_change().mean() * 100
-                coverage_trend = monthly_stats['insurance_face_amount'].pct_change().mean() * 100
-                risk_trend = monthly_stats['risk_count'].diff().mean()
-                
-                recent_month = monthly_stats.iloc[-1]
-                prev_month = monthly_stats.iloc[-2] if len(monthly_stats) > 1 else recent_month
-                
-                prompt = f"""You are analyzing a life insurance portfolio. Provide a clear executive summary with actionable insights.
+            # Calculate key metrics for AI
+            total_customers = len(df)
+            total_portfolio = df['insurance_face_amount'].sum()
+            avg_coverage = df['insurance_face_amount'].mean()
+            avg_age = df['age'].mean() if 'age' in df else 0
+            high_risk_count = len(df[df['risk_count'] >= 3])
+            high_risk_pct = (high_risk_count / total_customers * 100) if total_customers > 0 else 0
+            
+            # Get top policy
+            if 'policy_type' in df.columns:
+                top_policy = df[df['policy_type'].notna()]['policy_type'].mode()[0] if len(df[df['policy_type'].notna()]) > 0 else "N/A"
+                top_policy_pct = (df['policy_type'] == top_policy).sum() / len(df) * 100
+            else:
+                top_policy = "N/A"
+                top_policy_pct = 0
+            
+            # Upsell opportunities
+            upsell_count = len(df[df['upsell_count'] >= 2])
+            low_coverage = len(df[df['insurance_face_amount'] < 100000])
+            
+            prompt = f"""You are analyzing a life insurance portfolio for an executive dashboard. Provide 3-4 clear, actionable insights.
 
 Portfolio Metrics:
-- Total Customers: {len(df):,}
-- Total Portfolio Value: ${df['insurance_face_amount'].sum():,.0f}
-- Average Coverage: ${df['insurance_face_amount'].mean():,.0f}
-- Average Customer Age: {df['age'].mean():.1f} years
+- Total Customers: {total_customers:,}
+- Total Portfolio Value: ${total_portfolio:,.0f}
+- Average Coverage: ${avg_coverage:,.0f}
+- Average Customer Age: {avg_age:.1f} years
+- High Risk Customers: {high_risk_count:,} ({high_risk_pct:.1f}%)
+- Top Policy Type: {top_policy} ({top_policy_pct:.1f}%)
+- Upsell Candidates: {upsell_count:,} customers
+- Low Coverage (<$100K): {low_coverage:,} customers
 
-Trends (Month-over-Month):
-- Customer Growth: {customer_trend:+.1f}% average monthly change
-- Coverage Trend: {coverage_trend:+.1f}% average monthly change  
-- Risk Score Trend: {risk_trend:+.2f} change in risk score
+Provide 3-4 bullet points that:
+1. Lead with the MOST IMPORTANT finding (what matters right now)
+2. Include specific numbers and percentages
+3. Give ONE clear action for each insight
+4. Be direct and concise (1-2 sentences per point)
 
-Recent Performance:
-- Last Month: {recent_month['primary_full_name']:.0f} customers, ${recent_month['insurance_face_amount']:,.0f} avg coverage
-- Previous Month: {prev_month['primary_full_name']:.0f} customers, ${prev_month['insurance_face_amount']:,.0f} avg coverage
+Format as: "📈 [Finding]: [Specific detail]. → Action: [What to do]"
 
-Top Policy Type: {df['policy_type'].mode()[0]} ({(df['policy_type'] == df['policy_type'].mode()[0]).sum() / len(df) * 100:.1f}%)
-
-Provide 4-5 bullet points that:
-1. Start with the most important finding (what matters most right now)
-2. Explain trends in plain English (avoid jargon)
-3. Give specific, actionable recommendations
-4. Highlight risks or opportunities
-5. Answer "so what?" for each insight
-
-Format as clear bullets starting with bold action words like "⚠️ Address:", "💡 Opportunity:", "📈 Trend:", etc."""
-                
-                try:
-                    message = claude_client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    st.session_state['overview_insights'] = message.content[0].text
-                except Exception as e:
-                    st.session_state['overview_insights'] = "Unable to generate insights at this time."
+Example format:
+📈 Portfolio Growth: 23% increase in Q4, momentum building. → Action: Prepare for higher onboarding capacity
+💡 Upsell Opportunity: 450 customers with coverage below $100K. → Action: Launch targeted upgrade campaign"""
+            
+            try:
+                message = claude_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=800,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                st.session_state['overview_insights'] = message.content[0].text
+            except Exception as e:
+                st.session_state['overview_insights'] = f"Unable to generate insights: {str(e)}"
     
     # Display AI insights prominently
-    col1, col2 = st.columns([5, 1])
-    with col2:
-        if st.button("🔄 Refresh", key="refresh_overview"):
-            if 'overview_insights' in st.session_state:
-                del st.session_state['overview_insights']
-            st.rerun()
-    
     if 'overview_insights' in st.session_state:
+        col1, col2 = st.columns([5, 1])
+        with col2:
+            if st.button("🔄", key="refresh_overview", help="Refresh insights"):
+                del st.session_state['overview_insights']
+                st.rerun()
+        
         st.markdown(f"""
-            <div class="insight-box">
-                <h3 style="color: white; margin-top: 0;">🎯 What You Need to Know</h3>
+            <div style='background: linear-gradient(135deg, {BURNT_ORANGE} 0%, #9A4600 100%); 
+                        color: white; 
+                        padding: 1.5rem; 
+                        border-radius: 10px; 
+                        margin-bottom: 2rem;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+                <h3 style="color: white; margin-top: 0; margin-bottom: 1rem;">🎯 AI-Powered Insights</h3>
+                <div style="line-height: 1.8; font-size: 0.95rem;">
                 {st.session_state['overview_insights'].replace(chr(10), '<br>')}
+                </div>
             </div>
         """, unsafe_allow_html=True)
     elif not claude_client:
-        st.info("💡 **Quick Insights:** Connect your API key to get AI-powered executive summaries of your portfolio trends.")
-    
-    st.markdown("---")
-    
-    # Time-based metrics with narrative
-    if 'date_field' in df.columns:
-        df_sorted = df.sort_values('date_field')
+        # Show helpful message about adding API key
+        st.markdown("""
+            <div style='background: #EBF8FF; 
+                        padding: 1.5rem; 
+                        border-radius: 10px; 
+                        margin-bottom: 2rem;
+                        border-left: 4px solid #4299E1;'>
+                <h4 style="margin-top: 0; color: #2D3748;">🤖 AI Insights Available</h4>
+                <p style="margin-bottom: 1rem; color: #4A5568;">Enable AI-powered portfolio analysis by adding your Anthropic API key.</p>
+                <p style="margin-bottom: 0.5rem; color: #2D3748;"><strong>How to add your API key:</strong></p>
+                <ol style="margin-left: 1rem; color: #4A5568;">
+                    <li>Click <strong>"Manage app"</strong> (bottom right of your Streamlit app)</li>
+                    <li>Go to <strong>Settings → Secrets</strong></li>
+                    <li>Add: <code>ANTHROPIC_API_KEY = "sk-ant-api03-your-key-here"</code></li>
+                    <li>Click <strong>Save</strong></li>
+                    <li>Refresh this page</li>
+                </ol>
+                <p style="margin-top: 1rem; color: #4A5568; font-size: 0.9rem;">
+                    Get your API key at: <a href="https://console.anthropic.com/" target="_blank" style="color: #4299E1;">console.anthropic.com</a>
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
         
-        # Monthly trends
-        df['month'] = df['date_field'].dt.to_period('M').astype(str)
-        monthly_stats = df.groupby('month').agg({
-            'primary_full_name': 'count',
-            'insurance_face_amount': 'mean',
-            'risk_count': 'mean'
-        }).reset_index()
-        monthly_stats.columns = ['Month', 'New Customers', 'Avg Coverage', 'Avg Risk Score']
-        
-        # Calculate trend direction
-        customer_change = 0
-        coverage_change = 0
-        risk_change = 0
-        
-        if len(monthly_stats) >= 2:
-            customer_change = ((monthly_stats['New Customers'].iloc[-1] - monthly_stats['New Customers'].iloc[0]) / 
-                             monthly_stats['New Customers'].iloc[0] * 100)
-            coverage_change = ((monthly_stats['Avg Coverage'].iloc[-1] - monthly_stats['Avg Coverage'].iloc[0]) / 
-                             monthly_stats['Avg Coverage'].iloc[0] * 100)
-            risk_change = monthly_stats['Avg Risk Score'].iloc[-1] - monthly_stats['Avg Risk Score'].iloc[0]
-        
-        st.markdown("### 📈 Trend Analysis")
-        
-        # Customer Acquisition with insight
-        if len(monthly_stats) >= 2:
-            st.markdown(f"""
-            **Customer Growth Trajectory**
-            {f"📈 Up {customer_change:.1f}% from baseline" if customer_change > 0 else f"📉 Down {abs(customer_change):.1f}% from baseline"}
-            """)
-        else:
-            st.markdown("**Customer Growth Trajectory**")
-            st.caption("Need at least 2 months of data to show trends")
-        
-        fig = px.line(monthly_stats, x='Month', y='New Customers',
-                     markers=True, color_discrete_sequence=[BURNT_ORANGE])
-        fig.update_layout(showlegend=False, height=300)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if len(monthly_stats) >= 2:
-                st.markdown(f"""
-                **Coverage Trends**
-                {f"💰 Average coverage {'increased' if coverage_change > 0 else 'decreased'} by {abs(coverage_change):.1f}%"}
-                """)
-            else:
-                st.markdown("**Coverage Trends**")
-                st.caption("Need at least 2 months of data to show trends")
+        # Add debug expander
+        with st.expander("🔍 Troubleshooting API Key"):
+            st.markdown("**Checking API key configuration...**")
             
-            fig = px.line(monthly_stats, x='Month', y='Avg Coverage',
-                         markers=True, color_discrete_sequence=[CHARCOAL_GRAY])
-            fig.update_layout(showlegend=False, yaxis_tickprefix="$", height=300)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            if len(monthly_stats) >= 2:
-                st.markdown(f"""
-                **Risk Profile Changes**
-                {f"⚠️ Risk score {'increased' if risk_change > 0 else 'decreased'} by {abs(risk_change):.2f} points"}
-                """)
-            else:
-                st.markdown("**Risk Profile Changes**")
-                st.caption("Need at least 2 months of data to show trends")
+            # Check if secrets exist
+            has_secrets = hasattr(st, 'secrets')
+            st.write(f"✅ Streamlit secrets accessible: {has_secrets}")
             
-            fig = px.line(monthly_stats, x='Month', y='Avg Risk Score',
-                         markers=True, color_discrete_sequence=['#d32f2f'])
-            fig.update_layout(showlegend=False, height=300)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Policy mix analysis
-        if 'policy_type' in df.columns and len(monthly_stats) >= 1:
-            st.markdown("---")
-            st.markdown("### 📊 Portfolio Composition")
-            
-            policy_monthly = df.groupby(['month', 'policy_type']).size().reset_index(name='count')
-            
-            # Calculate policy mix insights
-            if len(policy_monthly) > 0:
-                latest_month = policy_monthly[policy_monthly['month'] == policy_monthly['month'].max()]
-                if len(latest_month) > 0:
-                    policy_leader = latest_month.nlargest(1, 'count')['policy_type'].values[0]
-                    policy_leader_pct = latest_month.nlargest(1, 'count')['count'].values[0] / latest_month['count'].sum() * 100
+            if has_secrets:
+                has_key = "ANTHROPIC_API_KEY" in st.secrets
+                st.write(f"{'✅' if has_key else '❌'} ANTHROPIC_API_KEY in secrets: {has_key}")
+                
+                if has_key:
+                    key_value = st.secrets["ANTHROPIC_API_KEY"]
+                    key_length = len(key_value) if key_value else 0
+                    key_starts_correctly = key_value.startswith("sk-ant-") if key_value else False
                     
-                    st.markdown(f"""
-                    **Current Mix:** {policy_leader} dominates at {policy_leader_pct:.1f}% of new policies
-                    """)
+                    st.write(f"✅ Key length: {key_length} characters")
+                    st.write(f"{'✅' if key_starts_correctly else '❌'} Key starts with 'sk-ant-': {key_starts_correctly}")
                     
-                    fig = px.area(policy_monthly, x='month', y='count', color='policy_type',
-                                color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
-                    fig.update_layout(xaxis_title="Month", yaxis_title="Count", height=300)
-                    st.plotly_chart(fig, use_container_width=True)
+                    if not key_starts_correctly:
+                        st.error("❌ Your API key should start with 'sk-ant-api03-'")
+                    elif key_length < 50:
+                        st.error("❌ Your API key seems too short")
+                    else:
+                        st.success("✅ API key format looks correct!")
+                        st.info("If insights still don't work, try clicking the 🔄 button above or refreshing the page.")
+            else:
+                st.error("❌ Cannot access Streamlit secrets")
+            
+            # Check environment variable
+            env_key = os.getenv("ANTHROPIC_API_KEY")
+            has_env = env_key is not None and env_key != ""
+            st.write(f"{'✅' if has_env else '❌'} Environment variable set: {has_env}")
     
-    # Key metrics with context
-    st.markdown("---")
-    st.markdown("### 🎯 Portfolio Snapshot")
-    
+    # Clean filter row at top
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if 'age' in df.columns:
-            avg_age = df['age'].mean()
-            age_segment = "Young" if avg_age < 35 else "Mid-Career" if avg_age < 55 else "Pre-Retirement"
-            st.metric("Avg Customer Age", f"{avg_age:.1f} years", f"{age_segment} Focus")
+        if 'date_field' in df.columns:
+            date_options = ["All Time", "Last Month", "Last 3 Months", "Last 6 Months", "Last Year"]
+            selected_date = st.selectbox("📅 Time Period", date_options, key="exec_date")
+        else:
+            selected_date = "All Time"
     
     with col2:
-        total_coverage = df['insurance_face_amount'].sum() if 'insurance_face_amount' in df else 0
-        avg_per_customer = total_coverage / len(df)
-        st.metric("Total Portfolio Value", f"${total_coverage:,.0f}", f"${avg_per_customer:,.0f}/customer")
-        
-    with col3:
         if 'policy_type' in df.columns:
-            top_policy = df['policy_type'].mode()[0]
-            pct = (df['policy_type'] == top_policy).sum() / len(df) * 100
-            st.metric("Leading Policy Type", top_policy, f"{pct:.1f}% share")
+            policy_options = ["All Policies"] + sorted([p for p in df['policy_type'].unique() if pd.notna(p)])
+            selected_policy_filter = st.selectbox("📋 Policy Type", policy_options, key="exec_policy")
+        else:
+            selected_policy_filter = "All Policies"
+    
+    with col3:
+        if 'state' in df.columns:
+            state_options = ["All States"] + sorted(df['state'].unique().tolist())
+            selected_state_filter = st.selectbox("📍 State", state_options, key="exec_state")
+        else:
+            selected_state_filter = "All States"
     
     with col4:
-        high_value = len(df[df['insurance_face_amount'] > df['insurance_face_amount'].median()])
-        pct_high_value = high_value / len(df) * 100
-        st.metric("High-Value Customers", f"{high_value:,}", f"{pct_high_value:.1f}% of base")
+        risk_options = ["All Risk Levels", "Low Risk (0-1)", "Medium Risk (2)", "High Risk (3+)"]
+        selected_risk_filter = st.selectbox("⚠️ Risk Level", risk_options, key="exec_risk")
+    
+    st.markdown("---")
+    
+    # Big metric cards with trends
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown("""
+        <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <p style='color: #666; font-size: 0.9rem; margin: 0;'>Total Customers</p>
+            <h2 style='color: #2D3748; font-size: 2.5rem; margin: 0.5rem 0;'>{:,}</h2>
+            <p style='color: #48BB78; font-size: 0.85rem; margin: 0;'>↑ Active portfolio</p>
+        </div>
+        """.format(len(df)), unsafe_allow_html=True)
+    
+    with col2:
+        avg_coverage = df['insurance_face_amount'].mean() if 'insurance_face_amount' in df else 0
+        st.markdown("""
+        <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <p style='color: #666; font-size: 0.9rem; margin: 0;'>Avg Coverage</p>
+            <h2 style='color: #2D3748; font-size: 2.5rem; margin: 0.5rem 0;'>${:,.0f}</h2>
+            <p style='color: #48BB78; font-size: 0.85rem; margin: 0;'>Per customer</p>
+        </div>
+        """.format(avg_coverage), unsafe_allow_html=True)
+    
+    with col3:
+        total_portfolio = df['insurance_face_amount'].sum() if 'insurance_face_amount' in df else 0
+        st.markdown("""
+        <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <p style='color: #666; font-size: 0.9rem; margin: 0;'>Total Portfolio Value</p>
+            <h2 style='color: #2D3748; font-size: 2.5rem; margin: 0.5rem 0;'>${:,.0f}</h2>
+            <p style='color: #48BB78; font-size: 0.85rem; margin: 0;'>Total coverage</p>
+        </div>
+        """.format(total_portfolio), unsafe_allow_html=True)
+    
+    with col4:
+        high_risk = len(df[df['risk_count'] >= 3])
+        risk_pct = (high_risk / len(df) * 100) if len(df) > 0 else 0
+        st.markdown("""
+        <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <p style='color: #666; font-size: 0.9rem; margin: 0;'>High Risk</p>
+            <h2 style='color: #2D3748; font-size: 2.5rem; margin: 0.5rem 0;'>{:,}</h2>
+            <p style='color: #F56565; font-size: 0.85rem; margin: 0;'>{:.1f}% of portfolio</p>
+        </div>
+        """.format(high_risk, risk_pct), unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Charts row
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 📊 Portfolio by Policy Type")
+        if 'policy_type' in df.columns:
+            policy_counts = df[df['policy_type'].notna()]['policy_type'].value_counts()
+            fig = px.pie(
+                values=policy_counts.values, 
+                names=policy_counts.index,
+                hole=0.5,
+                color_discrete_sequence=['#4299E1', '#48BB78', '#ED8936', '#9F7AEA', '#F56565']
+            )
+            fig.update_layout(
+                showlegend=True,
+                height=300,
+                margin=dict(l=20, r=20, t=20, b=20),
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                font=dict(size=12)
+            )
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("### 📈 Coverage Distribution")
+        if 'insurance_face_amount' in df.columns:
+            coverage_data = df[df['insurance_face_amount'] > 0]['insurance_face_amount']
+            
+            # Create bins
+            bins = [0, 50000, 100000, 200000, 300000, 500000, 1000000, float('inf')]
+            labels = ['<$50K', '$50-100K', '$100-200K', '$200-300K', '$300-500K', '$500K-$1M', '>$1M']
+            coverage_binned = pd.cut(coverage_data, bins=bins, labels=labels)
+            coverage_counts = coverage_binned.value_counts().sort_index()
+            
+            fig = px.bar(
+                x=coverage_counts.index,
+                y=coverage_counts.values,
+                color_discrete_sequence=['#4299E1']
+            )
+            fig.update_layout(
+                showlegend=False,
+                height=300,
+                margin=dict(l=20, r=20, t=20, b=20),
+                xaxis_title="Coverage Range",
+                yaxis_title="Customers",
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                font=dict(size=12)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Second row of charts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 🗺️ Geographic Distribution")
+        if 'state' in df.columns:
+            state_counts = df['state'].value_counts().head(10)
+            
+            fig = px.bar(
+                x=state_counts.values,
+                y=state_counts.index,
+                orientation='h',
+                color_discrete_sequence=['#48BB78']
+            )
+            fig.update_layout(
+                showlegend=False,
+                height=350,
+                margin=dict(l=20, r=20, t=20, b=20),
+                xaxis_title="Customers",
+                yaxis_title="",
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                font=dict(size=12)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("### ⚠️ Risk Distribution")
+        risk_labels = ['Low (0-1)', 'Medium (2)', 'High (3+)']
+        risk_counts = [
+            len(df[df['risk_count'] <= 1]),
+            len(df[df['risk_count'] == 2]),
+            len(df[df['risk_count'] >= 3])
+        ]
+        
+        fig = px.bar(
+            x=risk_labels,
+            y=risk_counts,
+            color=risk_labels,
+            color_discrete_map={
+                'Low (0-1)': '#48BB78',
+                'Medium (2)': '#ED8936',
+                'High (3+)': '#F56565'
+            }
+        )
+        fig.update_layout(
+            showlegend=False,
+            height=350,
+            margin=dict(l=20, r=20, t=20, b=20),
+            xaxis_title="Risk Level",
+            yaxis_title="Customers",
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            font=dict(size=12)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Key insights section
+    st.markdown("### 🎯 Key Insights")
+    
+    insight_col1, insight_col2, insight_col3 = st.columns(3)
+    
+    with insight_col1:
+        if 'age' in df.columns:
+            avg_age = df['age'].mean()
+            st.markdown(f"""
+            <div style='background: #EBF8FF; padding: 1rem; border-radius: 8px; border-left: 4px solid #4299E1;'>
+                <p style='margin: 0; font-weight: 600; color: #2D3748;'>Average Customer Age</p>
+                <p style='margin: 0.5rem 0 0 0; font-size: 1.5rem; color: #4299E1;'>{avg_age:.1f} years</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    with insight_col2:
+        if 'policy_type' in df.columns:
+            top_policy = df[df['policy_type'].notna()]['policy_type'].mode()[0] if len(df[df['policy_type'].notna()]) > 0 else "N/A"
+            top_policy_pct = (df['policy_type'] == top_policy).sum() / len(df) * 100 if len(df) > 0 else 0
+            st.markdown(f"""
+            <div style='background: #F0FFF4; padding: 1rem; border-radius: 8px; border-left: 4px solid #48BB78;'>
+                <p style='margin: 0; font-weight: 600; color: #2D3748;'>Most Popular Policy</p>
+                <p style='margin: 0.5rem 0 0 0; font-size: 1.5rem; color: #48BB78;'>{top_policy} ({top_policy_pct:.0f}%)</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    with insight_col3:
+        upsell_candidates = len(df[df['upsell_count'] >= 2])
+        st.markdown(f"""
+        <div style='background: #FFFAF0; padding: 1rem; border-radius: 8px; border-left: 4px solid #ED8936;'>
+            <p style='margin: 0; font-weight: 600; color: #2D3748;'>Upsell Opportunities</p>
+            <p style='margin: 0.5rem 0 0 0; font-size: 1.5rem; color: #ED8936;'>{upsell_candidates:,} customers</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # TAB 2: GEOGRAPHIC HEATMAP (NEW)
 with tab2:
