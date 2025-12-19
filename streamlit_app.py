@@ -294,11 +294,11 @@ st.markdown(f"""
 with st.sidebar:
     st.image("https://via.placeholder.com/200x80/B75400/FFFFFF?text=SYNTEX+Data")
     
-    st.markdown("### 📊 Upload Data")
+    st.markdown("### Upload Data")
     uploaded_file = st.file_uploader("Upload Life Insurance CSV", type=['csv'])
     
     if uploaded_file is not None:
-        st.success("✅ New data uploaded and saved!")
+        st.success("[OK] New data uploaded and saved!")
     elif load_persistent_data() is not None:
         st.info("📂 Using previously uploaded data")
     
@@ -325,7 +325,7 @@ with st.sidebar:
     **Built by Syntex Data**
     """)
     
-    if st.button("🔄 Refresh Data"):
+    if st.button("Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
@@ -333,8 +333,8 @@ with st.sidebar:
 df = load_data(uploaded_file)
 
 if df is None:
-    st.warning("⚠️ No data loaded. Please upload a CSV file.")
-    st.info("💡 **Tip:** Upload a CSV with customer life insurance data to get started.")
+    st.warning("No data loaded. Please upload a CSV file.")
+    st.info("**Tip:** Upload a CSV with customer life insurance data to get started.")
     st.stop()
 
 # Store in session state
@@ -361,48 +361,126 @@ with col4:
     upsell_candidates = len(df[df['upsell_count'] >= 2])
     st.metric("Upsell Opportunities", f"{upsell_candidates:,}")
 
+# GLOBAL FILTERS (Apply to all tabs)
+st.markdown("### Filters")
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    if 'date_field' in df.columns:
+        date_options = ["All Time", "Last Month", "Last 3 Months", "Last 6 Months", "Last Year"]
+        selected_date = st.selectbox("Time Period", date_options, key="global_date")
+    else:
+        selected_date = "All Time"
+
+with col2:
+    if 'policy_type' in df.columns:
+        policy_options = ["All Policies"] + sorted([p for p in df['policy_type'].unique() if pd.notna(p)])
+        selected_policy_filter = st.selectbox("Policy Type", policy_options, key="global_policy")
+    else:
+        selected_policy_filter = "All Policies"
+
+with col3:
+    if 'state' in df.columns:
+        state_options = ["All States"] + sorted(df['state'].unique().tolist())
+        selected_state_filter = st.selectbox("State", state_options, key="global_state")
+    else:
+        selected_state_filter = "All States"
+
+with col4:
+    risk_options = ["All Risk Levels", "Low Risk (0-1)", "Medium Risk (2)", "High Risk (3+)"]
+    selected_risk_filter = st.selectbox("Risk Level", risk_options, key="global_risk")
+
+# APPLY FILTERS TO CREATE FILTERED DATAFRAME (used by all tabs)
+filtered_df = df.copy()
+
+# Filter by policy type
+if selected_policy_filter != "All Policies":
+    filtered_df = filtered_df[filtered_df['policy_type'] == selected_policy_filter]
+
+# Filter by state
+if selected_state_filter != "All States":
+    filtered_df = filtered_df[filtered_df['state'] == selected_state_filter]
+
+# Filter by risk level
+if selected_risk_filter == "Low Risk (0-1)":
+    filtered_df = filtered_df[filtered_df['risk_count'] <= 1]
+elif selected_risk_filter == "Medium Risk (2)":
+    filtered_df = filtered_df[filtered_df['risk_count'] == 2]
+elif selected_risk_filter == "High Risk (3+)":
+    filtered_df = filtered_df[filtered_df['risk_count'] >= 3]
+
+# Filter by time period
+if selected_date != "All Time" and 'date_field' in filtered_df.columns:
+    from datetime import datetime, timedelta
+    cutoff_date = datetime.now()
+    
+    if selected_date == "Last Month":
+        cutoff_date = cutoff_date - timedelta(days=30)
+    elif selected_date == "Last 3 Months":
+        cutoff_date = cutoff_date - timedelta(days=90)
+    elif selected_date == "Last 6 Months":
+        cutoff_date = cutoff_date - timedelta(days=180)
+    elif selected_date == "Last Year":
+        cutoff_date = cutoff_date - timedelta(days=365)
+    
+    filtered_df = filtered_df[filtered_df['date_field'] >= cutoff_date]
+
+# Show filter summary if filters are active
+active_filters = []
+if selected_policy_filter != "All Policies":
+    active_filters.append(f"{selected_policy_filter}")
+if selected_state_filter != "All States":
+    active_filters.append(f"{selected_state_filter}")
+if selected_risk_filter != "All Risk Levels":
+    active_filters.append(f"{selected_risk_filter}")
+if selected_date != "All Time":
+    active_filters.append(f"{selected_date}")
+
+if active_filters:
+    st.info(f"**Active Filters:** {' | '.join(active_filters)} | Showing {len(filtered_df):,} of {len(df):,} customers")
+
 st.markdown("---")
 
 # Navigation - Now with 6 tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Executive Dashboard", 
-    "🗺️ Geographic Heatmap",
-    "📈 Portfolio Analysis", 
-    "🎯 Upsell Opportunities", 
-    "⚠️ Risk Analysis", 
-    "🤖 AI Chat"
+    "Executive Dashboard", 
+    "Geographic Heatmap",
+    "Portfolio Analysis", 
+    "Upsell Opportunities", 
+    "Risk Analysis", 
+    "AI Chat"
 ])
 
 # TAB 1: EXECUTIVE DASHBOARD (REDESIGNED)
 with tab1:
-    st.markdown("## 📊 Executive Dashboard")
+    st.markdown("## Executive Dashboard")
     
     # AI INSIGHTS BOX (Prominent at top)
     claude_client = get_claude_client()
     
     if claude_client and 'overview_insights' not in st.session_state:
-        with st.spinner("🤖 Analyzing your portfolio trends..."):
-            # Calculate key metrics for AI
-            total_customers = len(df)
-            total_portfolio = df['insurance_face_amount'].sum()
-            avg_coverage = df['insurance_face_amount'].mean()
-            avg_age = df['age'].mean() if 'age' in df else 0
-            high_risk_count = len(df[df['risk_count'] >= 3])
+        with st.spinner("Analyzing your portfolio trends..."):
+            # Calculate key metrics for AI (USING FILTERED DATA)
+            total_customers = len(filtered_df)
+            total_portfolio = filtered_df['insurance_face_amount'].sum()
+            avg_coverage = filtered_df['insurance_face_amount'].mean()
+            avg_age = filtered_df['age'].mean() if 'age' in filtered_df else 0
+            high_risk_count = len(filtered_df[filtered_df['risk_count'] >= 3])
             high_risk_pct = (high_risk_count / total_customers * 100) if total_customers > 0 else 0
             
             # Get top policy
-            if 'policy_type' in df.columns:
-                top_policy = df[df['policy_type'].notna()]['policy_type'].mode()[0] if len(df[df['policy_type'].notna()]) > 0 else "N/A"
-                top_policy_pct = (df['policy_type'] == top_policy).sum() / len(df) * 100
+            if 'policy_type' in filtered_df.columns:
+                top_policy = filtered_df[filtered_df['policy_type'].notna()]['policy_type'].mode()[0] if len(filtered_df[filtered_df['policy_type'].notna()]) > 0 else "N/A"
+                top_policy_pct = (filtered_df['policy_type'] == top_policy).sum() / len(filtered_df) * 100
             else:
                 top_policy = "N/A"
                 top_policy_pct = 0
             
             # Upsell opportunities
-            upsell_count = len(df[df['upsell_count'] >= 2])
-            low_coverage = len(df[df['insurance_face_amount'] < 100000])
+            upsell_count = len(filtered_df[filtered_df['upsell_count'] >= 2])
+            low_coverage = len(filtered_df[filtered_df['insurance_face_amount'] < 100000])
             
-            prompt = f"""You are analyzing a life insurance portfolio for an executive dashboard. Provide 3-4 clear, actionable insights.
+            prompt = f"""You are analyzing a life insurance portfolio. Provide exactly 3 clear, actionable insights.
 
 Portfolio Metrics:
 - Total Customers: {total_customers:,}
@@ -414,22 +492,35 @@ Portfolio Metrics:
 - Upsell Candidates: {upsell_count:,} customers
 - Low Coverage (<$100K): {low_coverage:,} customers
 
-Provide 3-4 bullet points that:
-1. Lead with the MOST IMPORTANT finding (what matters right now)
-2. Include specific numbers and percentages
-3. Give ONE clear action for each insight
-4. Be direct and concise (1-2 sentences per point)
+Provide EXACTLY 3 insights in this format:
 
-Format as: "📈 [Finding]: [Specific detail]. → Action: [What to do]"
+INSIGHT 1 | TYPE: [Revenue/Risk/Growth]
+TITLE: [5-7 word headline]
+FINDING: [One sentence with specific numbers]
+ACTION: [One sentence - what to do]
 
-Example format:
-📈 Portfolio Growth: 23% increase in Q4, momentum building. → Action: Prepare for higher onboarding capacity
-💡 Upsell Opportunity: 450 customers with coverage below $100K. → Action: Launch targeted upgrade campaign"""
+INSIGHT 2 | TYPE: [Revenue/Risk/Growth]
+TITLE: [5-7 word headline]
+FINDING: [One sentence with specific numbers]
+ACTION: [One sentence - what to do]
+
+INSIGHT 3 | TYPE: [Revenue/Risk/Growth]
+TITLE: [5-7 word headline]
+FINDING: [One sentence with specific numbers]
+ACTION: [One sentence - what to do]
+
+Rules:
+- TYPE must be exactly one of: Revenue, Risk, or Growth
+- TITLE must be 5-7 words maximum
+- FINDING must include specific numbers from the metrics
+- ACTION must be one clear sentence
+- Keep each sentence under 25 words
+- Be direct and concise"""
             
             try:
                 message = claude_client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=800,
+                    max_tokens=1000,
                     messages=[{"role": "user", "content": prompt}]
                 )
                 st.session_state['overview_insights'] = message.content[0].text
@@ -440,23 +531,126 @@ Example format:
     if 'overview_insights' in st.session_state:
         col1, col2 = st.columns([5, 1])
         with col2:
-            if st.button("🔄", key="refresh_overview", help="Refresh insights"):
+            if st.button("⟳", key="refresh_overview", help="Refresh insights"):
                 del st.session_state['overview_insights']
                 st.rerun()
         
-        st.markdown(f"""
-            <div style='background: linear-gradient(135deg, {BURNT_ORANGE} 0%, #9A4600 100%); 
-                        color: white; 
-                        padding: 1.5rem; 
-                        border-radius: 10px; 
-                        margin-bottom: 2rem;
-                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
-                <h3 style="color: white; margin-top: 0; margin-bottom: 1rem;">🎯 AI-Powered Insights</h3>
-                <div style="line-height: 1.8; font-size: 0.95rem;">
-                {st.session_state['overview_insights'].replace(chr(10), '<br>')}
+        # Parse insights into structured format
+        insights_text = st.session_state['overview_insights']
+        
+        # Try to parse structured insights
+        try:
+            insights = []
+            current_insight = {}
+            
+            for line in insights_text.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                if line.startswith('INSIGHT') and '|' in line and 'TYPE:' in line:
+                    if current_insight:
+                        insights.append(current_insight)
+                    # Extract type
+                    type_part = line.split('TYPE:')[1].strip()
+                    current_insight = {'type': type_part}
+                elif line.startswith('TITLE:'):
+                    current_insight['title'] = line.replace('TITLE:', '').strip()
+                elif line.startswith('FINDING:'):
+                    current_insight['finding'] = line.replace('FINDING:', '').strip()
+                elif line.startswith('ACTION:'):
+                    current_insight['action'] = line.replace('ACTION:', '').strip()
+            
+            # Add last insight
+            if current_insight and 'title' in current_insight:
+                insights.append(current_insight)
+            
+            # Display insights in separate cards if parsed successfully
+            if len(insights) >= 2:
+                st.markdown("### AI-Powered Insights")
+                
+                for idx, insight in enumerate(insights):
+                    insight_type = insight.get('type', 'Growth').lower()
+                    
+                    # Color scheme based on type - professional colors
+                    if 'revenue' in insight_type or 'upsell' in insight_type or 'opportunity' in insight_type:
+                        bg_color = '#2E7D32'  # Dark green
+                        type_label = 'REVENUE OPPORTUNITY'
+                    elif 'risk' in insight_type or 'alert' in insight_type:
+                        bg_color = '#C62828'  # Dark red
+                        type_label = 'RISK ALERT'
+                    else:  # Growth or other
+                        bg_color = '#1565C0'  # Dark blue
+                        type_label = 'GROWTH INSIGHT'
+                    
+                    title = insight.get('title', 'Insight')
+                    finding = insight.get('finding', '')
+                    action = insight.get('action', '')
+                    
+                    st.markdown(f"""
+                    <div style='background: {bg_color}; 
+                                color: white; 
+                                padding: 1.5rem; 
+                                border-radius: 8px; 
+                                margin-bottom: 1rem;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                        <div style='font-size: 0.7rem; 
+                                    font-weight: 700; 
+                                    letter-spacing: 0.1em; 
+                                    margin-bottom: 0.75rem; 
+                                    opacity: 0.95;
+                                    text-transform: uppercase;'>
+                            {type_label}
+                        </div>
+                        <h4 style='color: white; 
+                                   margin: 0 0 0.75rem 0; 
+                                   font-size: 1.15rem; 
+                                   font-weight: 600;'>{title}</h4>
+                        <p style='margin: 0 0 1rem 0; 
+                                  font-size: 0.95rem; 
+                                  line-height: 1.6; 
+                                  opacity: 0.95;'>{finding}</p>
+                        <div style='background: rgba(255,255,255,0.2); 
+                                    padding: 0.875rem; 
+                                    border-radius: 6px; 
+                                    border-left: 3px solid rgba(255,255,255,0.6);'>
+                            <strong style='font-size: 0.85rem; 
+                                          letter-spacing: 0.05em;'>RECOMMENDED ACTION:</strong> 
+                            <span style='font-size: 0.9rem; 
+                                        margin-left: 0.5rem;'>{action}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                # Fallback to original display if parsing fails
+                st.markdown(f"""
+                    <div style='background: linear-gradient(135deg, {BURNT_ORANGE} 0%, #9A4600 100%); 
+                                color: white; 
+                                padding: 1.5rem; 
+                                border-radius: 10px; 
+                                margin-bottom: 2rem;
+                                box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+                        <h3 style="color: white; margin-top: 0; margin-bottom: 1rem;">AI-Powered Insights</h3>
+                        <div style="line-height: 1.8; font-size: 0.95rem;">
+                        {st.session_state['overview_insights'].replace(chr(10), '<br>')}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+        except Exception as e:
+            # Fallback display on any error
+            st.markdown(f"""
+                <div style='background: linear-gradient(135deg, {BURNT_ORANGE} 0%, #9A4600 100%); 
+                            color: white; 
+                            padding: 1.5rem; 
+                            border-radius: 10px; 
+                            margin-bottom: 2rem;
+                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+                    <h3 style="color: white; margin-top: 0; margin-bottom: 1rem;">AI-Powered Insights</h3>
+                    <div style="line-height: 1.8; font-size: 0.95rem;">
+                    {st.session_state['overview_insights'].replace(chr(10), '<br>')}
+                    </div>
                 </div>
-            </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
     elif not claude_client:
         # Show helpful message about adding API key
         st.markdown("""
@@ -465,7 +659,7 @@ Example format:
                         border-radius: 10px; 
                         margin-bottom: 2rem;
                         border-left: 4px solid #4299E1;'>
-                <h4 style="margin-top: 0; color: #2D3748;">🤖 AI Insights Available</h4>
+                <h4 style="margin-top: 0; color: #2D3748;">AI Insights Available</h4>
                 <p style="margin-bottom: 1rem; color: #4A5568;">Enable AI-powered portfolio analysis by adding your Anthropic API key.</p>
                 <p style="margin-bottom: 0.5rem; color: #2D3748;"><strong>How to add your API key:</strong></p>
                 <ol style="margin-left: 1rem; color: #4A5568;">
@@ -482,71 +676,41 @@ Example format:
         """, unsafe_allow_html=True)
         
         # Add debug expander
-        with st.expander("🔍 Troubleshooting API Key"):
+        with st.expander("Troubleshooting API Key"):
             st.markdown("**Checking API key configuration...**")
             
             # Check if secrets exist
             has_secrets = hasattr(st, 'secrets')
-            st.write(f"✅ Streamlit secrets accessible: {has_secrets}")
+            st.write(f"[OK] Streamlit secrets accessible: {has_secrets}")
             
             if has_secrets:
                 has_key = "ANTHROPIC_API_KEY" in st.secrets
-                st.write(f"{'✅' if has_key else '❌'} ANTHROPIC_API_KEY in secrets: {has_key}")
+                st.write(f"{'[OK]' if has_key else '[ERROR]'} ANTHROPIC_API_KEY in secrets: {has_key}")
                 
                 if has_key:
                     key_value = st.secrets["ANTHROPIC_API_KEY"]
                     key_length = len(key_value) if key_value else 0
                     key_starts_correctly = key_value.startswith("sk-ant-") if key_value else False
                     
-                    st.write(f"✅ Key length: {key_length} characters")
-                    st.write(f"{'✅' if key_starts_correctly else '❌'} Key starts with 'sk-ant-': {key_starts_correctly}")
+                    st.write(f"[OK] Key length: {key_length} characters")
+                    st.write(f"{'[OK]' if key_starts_correctly else '[ERROR]'} Key starts with 'sk-ant-': {key_starts_correctly}")
                     
                     if not key_starts_correctly:
-                        st.error("❌ Your API key should start with 'sk-ant-api03-'")
+                        st.error("[ERROR] Your API key should start with 'sk-ant-api03-'")
                     elif key_length < 50:
-                        st.error("❌ Your API key seems too short")
+                        st.error("[ERROR] Your API key seems too short")
                     else:
-                        st.success("✅ API key format looks correct!")
-                        st.info("If insights still don't work, try clicking the 🔄 button above or refreshing the page.")
+                        st.success("[OK] API key format looks correct!")
+                        st.info("If insights still don't work, try clicking the Refresh button above or refreshing the page.")
             else:
-                st.error("❌ Cannot access Streamlit secrets")
+                st.error("[ERROR] Cannot access Streamlit secrets")
             
             # Check environment variable
             env_key = os.getenv("ANTHROPIC_API_KEY")
             has_env = env_key is not None and env_key != ""
-            st.write(f"{'✅' if has_env else '❌'} Environment variable set: {has_env}")
+            st.write(f"{'[OK]' if has_env else '[ERROR]'} Environment variable set: {has_env}")
     
-    # Clean filter row at top
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if 'date_field' in df.columns:
-            date_options = ["All Time", "Last Month", "Last 3 Months", "Last 6 Months", "Last Year"]
-            selected_date = st.selectbox("📅 Time Period", date_options, key="exec_date")
-        else:
-            selected_date = "All Time"
-    
-    with col2:
-        if 'policy_type' in df.columns:
-            policy_options = ["All Policies"] + sorted([p for p in df['policy_type'].unique() if pd.notna(p)])
-            selected_policy_filter = st.selectbox("📋 Policy Type", policy_options, key="exec_policy")
-        else:
-            selected_policy_filter = "All Policies"
-    
-    with col3:
-        if 'state' in df.columns:
-            state_options = ["All States"] + sorted(df['state'].unique().tolist())
-            selected_state_filter = st.selectbox("📍 State", state_options, key="exec_state")
-        else:
-            selected_state_filter = "All States"
-    
-    with col4:
-        risk_options = ["All Risk Levels", "Low Risk (0-1)", "Medium Risk (2)", "High Risk (3+)"]
-        selected_risk_filter = st.selectbox("⚠️ Risk Level", risk_options, key="exec_risk")
-    
-    st.markdown("---")
-    
-    # Big metric cards with trends
+    # Big metric cards with trends (USING GLOBAL FILTERED DATA)
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -556,10 +720,10 @@ Example format:
             <h2 style='color: #2D3748; font-size: 2.5rem; margin: 0.5rem 0;'>{:,}</h2>
             <p style='color: #48BB78; font-size: 0.85rem; margin: 0;'>↑ Active portfolio</p>
         </div>
-        """.format(len(df)), unsafe_allow_html=True)
+        """.format(len(filtered_df)), unsafe_allow_html=True)
     
     with col2:
-        avg_coverage = df['insurance_face_amount'].mean() if 'insurance_face_amount' in df else 0
+        avg_coverage = filtered_df['insurance_face_amount'].mean() if 'insurance_face_amount' in filtered_df else 0
         st.markdown("""
         <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
             <p style='color: #666; font-size: 0.9rem; margin: 0;'>Avg Coverage</p>
@@ -569,7 +733,7 @@ Example format:
         """.format(avg_coverage), unsafe_allow_html=True)
     
     with col3:
-        total_portfolio = df['insurance_face_amount'].sum() if 'insurance_face_amount' in df else 0
+        total_portfolio = filtered_df['insurance_face_amount'].sum() if 'insurance_face_amount' in filtered_df else 0
         st.markdown("""
         <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
             <p style='color: #666; font-size: 0.9rem; margin: 0;'>Total Portfolio Value</p>
@@ -579,8 +743,8 @@ Example format:
         """.format(total_portfolio), unsafe_allow_html=True)
     
     with col4:
-        high_risk = len(df[df['risk_count'] >= 3])
-        risk_pct = (high_risk / len(df) * 100) if len(df) > 0 else 0
+        high_risk = len(filtered_df[filtered_df['risk_count'] >= 3])
+        risk_pct = (high_risk / len(filtered_df) * 100) if len(filtered_df) > 0 else 0
         st.markdown("""
         <div style='background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
             <p style='color: #666; font-size: 0.9rem; margin: 0;'>High Risk</p>
@@ -595,9 +759,9 @@ Example format:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 📊 Portfolio by Policy Type")
-        if 'policy_type' in df.columns:
-            policy_counts = df[df['policy_type'].notna()]['policy_type'].value_counts()
+        st.markdown("### Portfolio by Policy Type")
+        if 'policy_type' in filtered_df.columns:
+            policy_counts = filtered_df[filtered_df['policy_type'].notna()]['policy_type'].value_counts()
             fig = px.pie(
                 values=policy_counts.values, 
                 names=policy_counts.index,
@@ -616,9 +780,9 @@ Example format:
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("### 📈 Coverage Distribution")
-        if 'insurance_face_amount' in df.columns:
-            coverage_data = df[df['insurance_face_amount'] > 0]['insurance_face_amount']
+        st.markdown("### Coverage Distribution")
+        if 'insurance_face_amount' in filtered_df.columns:
+            coverage_data = filtered_df[filtered_df['insurance_face_amount'] > 0]['insurance_face_amount']
             
             # Create bins
             bins = [0, 50000, 100000, 200000, 300000, 500000, 1000000, float('inf')]
@@ -649,9 +813,9 @@ Example format:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 🗺️ Geographic Distribution")
-        if 'state' in df.columns:
-            state_counts = df['state'].value_counts().head(10)
+        st.markdown("### Geographic Distribution")
+        if 'state' in filtered_df.columns:
+            state_counts = filtered_df['state'].value_counts().head(10)
             
             fig = px.bar(
                 x=state_counts.values,
@@ -672,12 +836,12 @@ Example format:
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("### ⚠️ Risk Distribution")
+        st.markdown("### Risk Distribution")
         risk_labels = ['Low (0-1)', 'Medium (2)', 'High (3+)']
         risk_counts = [
-            len(df[df['risk_count'] <= 1]),
-            len(df[df['risk_count'] == 2]),
-            len(df[df['risk_count'] >= 3])
+            len(filtered_df[filtered_df['risk_count'] <= 1]),
+            len(filtered_df[filtered_df['risk_count'] == 2]),
+            len(filtered_df[filtered_df['risk_count'] >= 3])
         ]
         
         fig = px.bar(
@@ -705,13 +869,13 @@ Example format:
     st.markdown("<br>", unsafe_allow_html=True)
     
     # Key insights section
-    st.markdown("### 🎯 Key Insights")
+    st.markdown("### Key Insights")
     
     insight_col1, insight_col2, insight_col3 = st.columns(3)
     
     with insight_col1:
-        if 'age' in df.columns:
-            avg_age = df['age'].mean()
+        if 'age' in filtered_df.columns:
+            avg_age = filtered_df['age'].mean()
             st.markdown(f"""
             <div style='background: #EBF8FF; padding: 1rem; border-radius: 8px; border-left: 4px solid #4299E1;'>
                 <p style='margin: 0; font-weight: 600; color: #2D3748;'>Average Customer Age</p>
@@ -720,9 +884,9 @@ Example format:
             """, unsafe_allow_html=True)
     
     with insight_col2:
-        if 'policy_type' in df.columns:
-            top_policy = df[df['policy_type'].notna()]['policy_type'].mode()[0] if len(df[df['policy_type'].notna()]) > 0 else "N/A"
-            top_policy_pct = (df['policy_type'] == top_policy).sum() / len(df) * 100 if len(df) > 0 else 0
+        if 'policy_type' in filtered_df.columns:
+            top_policy = filtered_df[filtered_df['policy_type'].notna()]['policy_type'].mode()[0] if len(filtered_df[filtered_df['policy_type'].notna()]) > 0 else "N/A"
+            top_policy_pct = (filtered_df['policy_type'] == top_policy).sum() / len(filtered_df) * 100 if len(filtered_df) > 0 else 0
             st.markdown(f"""
             <div style='background: #F0FFF4; padding: 1rem; border-radius: 8px; border-left: 4px solid #48BB78;'>
                 <p style='margin: 0; font-weight: 600; color: #2D3748;'>Most Popular Policy</p>
@@ -731,7 +895,7 @@ Example format:
             """, unsafe_allow_html=True)
     
     with insight_col3:
-        upsell_candidates = len(df[df['upsell_count'] >= 2])
+        upsell_candidates = len(filtered_df[filtered_df['upsell_count'] >= 2])
         st.markdown(f"""
         <div style='background: #FFFAF0; padding: 1rem; border-radius: 8px; border-left: 4px solid #ED8936;'>
             <p style='margin: 0; font-weight: 600; color: #2D3748;'>Upsell Opportunities</p>
@@ -741,11 +905,11 @@ Example format:
 
 # TAB 2: GEOGRAPHIC HEATMAP (NEW)
 with tab2:
-    st.markdown("## 🗺️ Geographic Distribution & Performance")
+    st.markdown("## Geographic Distribution & Performance")
     
-    if 'state' in df.columns:
+    if 'state' in filtered_df.columns:
         # State-level aggregation
-        state_stats = df.groupby('state').agg({
+        state_stats = filtered_df.groupby('state').agg({
             'primary_full_name': 'count',
             'insurance_face_amount': ['sum', 'mean'],
             'risk_count': 'mean',
@@ -830,10 +994,10 @@ with tab2:
                 st.metric("👥 Total Customers", f"{total_customers:,}")
             with col3:
                 states_with_customers = len(state_stats)
-                st.metric("📍 States with Customers", f"{states_with_customers}")
+                st.metric("States with Customers", f"{states_with_customers}")
         
         elif map_view == "Total Portfolio Value":
-            st.markdown("### 💰 Total Portfolio Value by State")
+            st.markdown("### Total Portfolio Value by State")
             st.caption("Total insurance coverage amount per state • Green intensity shows market value")
             
             fig = go.Figure(data=go.Choropleth(
@@ -879,10 +1043,10 @@ with tab2:
                 st.metric("💼 Total Portfolio", f"${total_portfolio:,.0f}")
             with col3:
                 avg_state_value = state_stats['Total Coverage'].mean()
-                st.metric("📊 Avg State Value", f"${avg_state_value:,.0f}")
+                st.metric("Avg State Value", f"${avg_state_value:,.0f}")
         
         elif map_view == "Average Coverage per Customer":
-            st.markdown("### 📊 Average Coverage per Customer")
+            st.markdown("### Average Coverage per Customer")
             st.caption("Average policy value by state • Orange intensity shows premium customers")
             
             fig = go.Figure(data=go.Choropleth(
@@ -925,13 +1089,13 @@ with tab2:
                 st.metric("🏆 Premium Market", highest_avg_state, f"${highest_avg:,.0f} avg")
             with col2:
                 overall_avg = state_stats['Avg Coverage'].mean()
-                st.metric("📊 National Average", f"${overall_avg:,.0f}")
+                st.metric("National Average", f"${overall_avg:,.0f}")
             with col3:
                 premium_states = len(state_stats[state_stats['Avg Coverage'] > overall_avg])
                 st.metric("⭐ Above Average States", f"{premium_states}")
         
         elif map_view == "Risk Distribution":
-            st.markdown("### ⚠️ Risk Distribution by State")
+            st.markdown("### Risk Distribution by State")
             st.caption("Average risk score per state • Red = high risk, Yellow = medium, Green = low risk")
             
             fig = go.Figure(data=go.Choropleth(
@@ -972,17 +1136,17 @@ with tab2:
             with col1:
                 highest_risk_state = state_stats.nlargest(1, 'Avg Risk')['state'].values[0]
                 highest_risk = state_stats.nlargest(1, 'Avg Risk')['Avg Risk'].values[0]
-                st.metric("⚠️ Highest Risk State", highest_risk_state, f"{highest_risk:.2f} risk score")
+                st.metric("Highest Risk State", highest_risk_state, f"{highest_risk:.2f} risk score")
             with col2:
                 avg_risk = state_stats['Avg Risk'].mean()
-                st.metric("📊 National Avg Risk", f"{avg_risk:.2f}")
+                st.metric("National Avg Risk", f"{avg_risk:.2f}")
             with col3:
                 high_risk_states = len(state_stats[state_stats['Avg Risk'] >= 2.5])
                 st.metric("🚨 High Risk States", f"{high_risk_states}")
         
         # Summary Table - always show below the map
         st.markdown("---")
-        st.markdown("### 📈 State Performance Summary")
+        st.markdown("### State Performance Summary")
         
         # Create a sortable, formatted table
         summary_table = state_stats[['state', 'Customer Count', 'Market Share %', 'Total Coverage', 
@@ -1010,14 +1174,14 @@ with tab2:
 
 # TAB 3: PORTFOLIO ANALYSIS (Original Overview)
 with tab3:
-    st.markdown("## 🤖 AI-Generated Insights")
+    st.markdown("## AI-Generated Insights")
     
     col1, col2 = st.columns([4, 1])
     with col2:
-        if st.button("🔄 Regenerate", key="regenerate_insights"):
+        if st.button("Regenerate", key="regenerate_insights"):
             with st.spinner("Generating insights..."):
                 claude_client = get_claude_client()
-                insights = generate_insights_with_ai(df, claude_client)
+                insights = generate_insights_with_ai(filtered_df, claude_client)
                 st.session_state['insights'] = insights
     
     if 'insights' in st.session_state:
@@ -1028,6 +1192,7 @@ with tab3:
         """, unsafe_allow_html=True)
     else:
         st.info("Click 'Regenerate' to generate AI insights for your portfolio.")
+    
     
     st.markdown("---")
     
@@ -1054,15 +1219,15 @@ with tab3:
     
     with col1:
         st.markdown("### Policy Types")
-        if 'policy_type' in df.columns:
-            policy_counts = df['policy_type'].value_counts()
+        if 'policy_type' in filtered_df.columns:
+            policy_counts = filtered_df['policy_type'].value_counts()
             fig = px.pie(values=policy_counts.values, names=policy_counts.index,
                         color_discrete_sequence=[BURNT_ORANGE, CHARCOAL_GRAY, LIGHT_GRAY, "#9A4600"])
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         st.markdown("### Risk Distribution")
-        risk_dist = df['risk_count'].value_counts().sort_index()
+        risk_dist = filtered_df['risk_count'].value_counts().sort_index()
         fig = px.bar(x=risk_dist.index, y=risk_dist.values,
                     labels={'x': 'Risk Factors', 'y': 'Customer Count'},
                     color_discrete_sequence=[BURNT_ORANGE])
@@ -1071,9 +1236,9 @@ with tab3:
 
 # TAB 4: UPSELL OPPORTUNITIES
 with tab4:
-    st.markdown("## 🎯 Upsell Opportunities")
+    st.markdown("## Upsell Opportunities")
     
-    upsell_df = df[df['upsell_count'] >= 2].sort_values('upsell_count', ascending=False)
+    upsell_df = filtered_df[filtered_df['upsell_count'] >= 2].sort_values('upsell_count', ascending=False)
     
     st.markdown(f"### Found {len(upsell_df)} customers with 2+ upsell opportunities")
     
@@ -1109,11 +1274,11 @@ with tab4:
 
 # TAB 5: RISK ANALYSIS
 with tab5:
-    st.markdown("## ⚠️ Risk Analysis")
+    st.markdown("## Risk Analysis")
     
-    high_risk = df[df['risk_count'] >= 3]
-    medium_risk = df[df['risk_count'] == 2]
-    low_risk = df[df['risk_count'] <= 1]
+    high_risk = filtered_df[filtered_df['risk_count'] >= 3]
+    medium_risk = filtered_df[filtered_df['risk_count'] == 2]
+    low_risk = filtered_df[filtered_df['risk_count'] <= 1]
     
     col1, col2, col3 = st.columns(3)
     
@@ -1129,7 +1294,7 @@ with tab5:
     st.markdown("---")
     
     all_risks = []
-    for risks in df['risk_factors']:
+    for risks in filtered_df['risk_factors']:
         all_risks.extend(risks)
     
     risk_counts = pd.Series(all_risks).value_counts()
@@ -1139,7 +1304,7 @@ with tab5:
     with col1:
         st.markdown("#### Risk Factor Prevalence")
         for risk, count in risk_counts.items():
-            pct = (count / len(df)) * 100
+            pct = (count / len(filtered_df)) * 100
             st.markdown(f"**{risk}**: {count} ({pct:.1f}%)")
     
     with col2:
@@ -1159,17 +1324,17 @@ with tab5:
         
         st.dataframe(high_risk[available_cols].head(20), use_container_width=True, hide_index=True)
     else:
-        st.success("✅ No high-risk customers found!")
+        st.success("[OK] No high-risk customers found!")
 
 # TAB 6: AI CHAT
 with tab6:
-    st.markdown("## 🤖 AI Assistant")
+    st.markdown("## AI Assistant")
     st.markdown("Ask questions about your life insurance portfolio and get AI-powered insights.")
     
     claude_client = get_claude_client()
     
     if claude_client is None:
-        st.warning("⚠️ AI chat unavailable. Please configure ANTHROPIC_API_KEY in Streamlit secrets.")
+        st.warning("AI chat unavailable. Please configure ANTHROPIC_API_KEY in Streamlit secrets.")
     else:
         if 'chat_history' not in st.session_state:
             st.session_state['chat_history'] = []
@@ -1221,7 +1386,7 @@ with tab6:
         
         if len(st.session_state['chat_history']) == 0:
             st.markdown("---")
-            st.markdown("#### 💡 Suggested Questions")
+            st.markdown("#### Suggested Questions")
             
             suggestions = [
                 "Which customers should we prioritize for upselling?",
